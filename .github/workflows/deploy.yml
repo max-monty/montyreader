@@ -18,18 +18,16 @@ jobs:
       # Install root dependencies and build frontend
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
       # Install Cloud Functions dependencies
       - run: cd functions && npm ci
 
-      # Deploy to Firebase
-      - uses: FirebaseExtended/action-hosting-deploy@v0
-        id: deploy-hosting
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          channelId: live
-          projectId: monty-reader
-
-      # Deploy functions, firestore rules, and indexes
-      - run: npx firebase deploy --only functions,firestore --token "${{ secrets.FIREBASE_TOKEN }}"
+      # Deploy everything to Firebase
+      - run: npx firebase deploy --force --token "${{ secrets.FIREBASE_TOKEN }}"
