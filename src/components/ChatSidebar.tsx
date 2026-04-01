@@ -245,10 +245,9 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
         className={`fixed z-50 p-2 rounded-lg transition-all duration-300
                     font-sans text-xs font-medium flex items-center gap-1.5
                     ${open
-                      ? "top-[7px] right-[408px] bg-white text-stone-500 hover:text-stone-700 border border-stone-200 shadow-sm"
-                      : "top-[7px] right-3 bg-stone-900 text-white hover:bg-stone-800 shadow-lg"
+                      ? "top-[52px] right-[408px] bg-white text-stone-500 hover:text-stone-700 border border-stone-200 shadow-sm"
+                      : "top-[52px] right-3 bg-stone-900 text-white hover:bg-stone-800 shadow-lg"
                     }`}
-        style={{ zIndex: 50 }}
       >
         {open ? <PanelRightClose size={16} /> : <><PanelRightOpen size={16} /> Chat</>}
       </button>
