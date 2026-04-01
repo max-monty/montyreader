@@ -1,0 +1,35 @@
+name: Deploy to Firebase
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Install root dependencies and build frontend
+      - run: npm ci
+      - run: npm run build
+
+      # Install Cloud Functions dependencies
+      - run: cd functions && npm ci
+
+      # Deploy to Firebase
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        id: deploy-hosting
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: monty-reader
+
+      # Deploy functions, firestore rules, and indexes
+      - run: npx firebase deploy --only functions,firestore --token "${{ secrets.FIREBASE_TOKEN }}"
