@@ -114,6 +114,17 @@ export async function getConversation(articleId: string): Promise<Conversation |
   return { id: snap.docs[0].id, ...snap.docs[0].data() } as Conversation;
 }
 
+export async function listConversations(articleId: string): Promise<Conversation[]> {
+  const q = query(
+    col("conversations"),
+    where("userId", "==", uid()),
+    where("articleId", "==", articleId),
+    orderBy("updatedAt", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Conversation);
+}
+
 export async function saveConversation(
   conv: Omit<Conversation, "id" | "userId"> & { id?: string }
 ): Promise<string> {

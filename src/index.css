@@ -124,10 +124,16 @@
   }
 
   /* Highlight styles */
-  .highlight-yellow { background-color: rgba(253, 224, 71, 0.4); }
-  .highlight-green { background-color: rgba(134, 239, 172, 0.4); }
-  .highlight-blue { background-color: rgba(147, 197, 253, 0.4); }
-  .highlight-pink { background-color: rgba(249, 168, 212, 0.4); }
+  .highlight-yellow,
+  mark.highlight-yellow {
+    background-color: rgba(253, 224, 71, 0.4);
+    color: inherit;
+    padding: 0.05em 0;
+    border-radius: 2px;
+  }
+  mark.highlight-yellow:hover {
+    background-color: rgba(253, 224, 71, 0.65);
+  }
 
   /* Chat markdown */
   .chat-message p { margin-bottom: 0.5em; }

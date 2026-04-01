@@ -1,10 +1,83 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Trash2 } from "lucide-react";
 import { getArticle, listHighlights, addHighlight, deleteHighlight as dbDeleteHighlight } from "../db";
 import type { Article, Highlight } from "../types";
 import ChatSidebar from "./ChatSidebar";
 import HighlightsPanel from "./HighlightsPanel";
+
+// Inject highlight marks into article HTML by matching text in the text-only content
+function applyHighlightsToHtml(html: string, highlights: Highlight[]): string {
+  if (!highlights.length) return html;
+
+  // Parse to a temp DOM to work with text nodes
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${html}</div>`, "text/html");
+  const container = doc.body.firstElementChild!;
+  const fullText = container.textContent || "";
+
+  // Sort highlights by startOffset descending so we can apply from end to start
+  // without shifting earlier offsets
+  const sorted = [...highlights].sort((a, b) => b.startOffset - a.startOffset);
+
+  for (const h of sorted) {
+    // Find the text in the full content
+    let idx = fullText.indexOf(h.text, Math.max(0, h.startOffset - 20));
+    if (idx === -1) idx = fullText.indexOf(h.text);
+    if (idx === -1) continue;
+
+    // Walk text nodes to find start and end positions
+    const walker = doc.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let charCount = 0;
+    const textNodes: { node: Text; start: number; end: number }[] = [];
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const len = node.textContent?.length || 0;
+      textNodes.push({ node, start: charCount, end: charCount + len });
+      charCount += len;
+    }
+
+    const hlStart = idx;
+    const hlEnd = idx + h.text.length;
+
+    // Find all text nodes that overlap with the highlight range
+    for (const tn of textNodes) {
+      if (tn.end <= hlStart || tn.start >= hlEnd) continue;
+
+      const nodeStart = Math.max(0, hlStart - tn.start);
+      const nodeEnd = Math.min(tn.node.textContent!.length, hlEnd - tn.start);
+
+      if (nodeStart === 0 && nodeEnd === tn.node.textContent!.length) {
+        // Whole node is highlighted
+        const mark = doc.createElement("mark");
+        mark.className = "highlight-yellow cursor-pointer";
+        mark.dataset.highlightId = h.id;
+        tn.node.parentNode!.replaceChild(mark, tn.node);
+        mark.appendChild(tn.node);
+      } else {
+        // Partial node — split and wrap
+        const text = tn.node.textContent!;
+        const before = text.substring(0, nodeStart);
+        const middle = text.substring(nodeStart, nodeEnd);
+        const after = text.substring(nodeEnd);
+
+        const frag = doc.createDocumentFragment();
+        if (before) frag.appendChild(doc.createTextNode(before));
+        const mark = doc.createElement("mark");
+        mark.className = "highlight-yellow cursor-pointer";
+        mark.dataset.highlightId = h.id;
+        mark.textContent = middle;
+        frag.appendChild(mark);
+        if (after) frag.appendChild(doc.createTextNode(after));
+
+        tn.node.parentNode!.replaceChild(frag, tn.node);
+      }
+    }
+  }
+
+  return container.innerHTML;
+}
 
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
@@ -14,7 +87,6 @@ export default function Reader() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; x: number; y: number } | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
-  const highlightsApplied = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -34,6 +106,12 @@ export default function Reader() {
     }
   }
 
+  // Compute highlighted HTML
+  const highlightedHtml = useMemo(() => {
+    if (!article?.content) return "";
+    return applyHighlightsToHtml(article.content, highlights);
+  }, [article?.content, highlights]);
+
   const handleMouseUp = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
@@ -44,32 +122,32 @@ export default function Reader() {
     const range = selection.getRangeAt(0);
     if (!contentRef.current?.contains(range.commonAncestorContainer)) return;
 
-    // Check if clicking on existing highlight
+    // Don't re-highlight already highlighted text
     const ancestor = range.commonAncestorContainer;
     const parentEl = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor as Element;
     if (parentEl?.closest("[data-highlight-id]")) return;
 
-    // Auto-highlight yellow
-    doHighlight(text, range.cloneRange());
+    doHighlight(text);
     selection.removeAllRanges();
   }, [article]);
 
-  async function doHighlight(text: string, range: Range) {
+  async function doHighlight(text: string) {
     if (!article?.id) return;
+
+    // Get offset from the raw text content
     const container = contentRef.current;
     if (!container) return;
-
-    const textContent = container.textContent || "";
-    const startOffset = textContent.indexOf(text);
+    const fullText = container.textContent || "";
+    const startOffset = fullText.indexOf(text);
     if (startOffset === -1) return;
 
-    const contextBefore = textContent.substring(Math.max(0, startOffset - 50), startOffset);
-    const contextAfter = textContent.substring(
+    const contextBefore = fullText.substring(Math.max(0, startOffset - 50), startOffset);
+    const contextAfter = fullText.substring(
       startOffset + text.length,
       startOffset + text.length + 50
     );
 
-    const newId = await addHighlight({
+    await addHighlight({
       articleId: article.id,
       text,
       color: "yellow",
@@ -79,14 +157,6 @@ export default function Reader() {
       contextAfter,
       createdAt: Date.now(),
     });
-
-    // Apply visually
-    try {
-      const span = document.createElement("span");
-      span.className = "highlight-yellow cursor-pointer";
-      span.dataset.highlightId = newId;
-      range.surroundContents(span);
-    } catch {}
 
     loadHighlights(article.id);
   }
@@ -105,78 +175,21 @@ export default function Reader() {
       });
       return;
     }
-    // Click anywhere else closes delete tooltip
     if (deleteTarget) setDeleteTarget(null);
   }
 
   async function confirmDelete() {
     if (!deleteTarget || !article?.id) return;
-    // Remove visual highlight
-    const span = contentRef.current?.querySelector(`[data-highlight-id="${deleteTarget.id}"]`);
-    if (span) {
-      const parent = span.parentNode;
-      while (span.firstChild) parent?.insertBefore(span.firstChild, span);
-      parent?.removeChild(span);
-    }
     await dbDeleteHighlight(deleteTarget.id);
     setDeleteTarget(null);
     loadHighlights(article.id);
   }
 
-  // Apply saved highlights to DOM
-  useEffect(() => {
-    if (!contentRef.current || !highlights.length || !article?.content) return;
-    // Avoid re-applying on every render
-    if (highlightsApplied.current) return;
-    highlightsApplied.current = true;
-
-    const container = contentRef.current;
-    const textContent = container.textContent || "";
-
-    highlights.forEach((h) => {
-      // Check if already applied
-      if (container.querySelector(`[data-highlight-id="${h.id}"]`)) return;
-
-      const idx = textContent.indexOf(h.text, Math.max(0, h.startOffset - 10));
-      if (idx === -1) return;
-
-      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-      let charCount = 0;
-      let startNode: Text | null = null;
-      let startNodeOffset = 0;
-      let endNode: Text | null = null;
-      let endNodeOffset = 0;
-
-      while (walker.nextNode()) {
-        const node = walker.currentNode as Text;
-        const nodeLen = node.textContent?.length || 0;
-        if (!startNode && charCount + nodeLen > idx) {
-          startNode = node;
-          startNodeOffset = idx - charCount;
-        }
-        if (startNode && charCount + nodeLen >= idx + h.text.length) {
-          endNode = node;
-          endNodeOffset = idx + h.text.length - charCount;
-          break;
-        }
-        charCount += nodeLen;
-      }
-
-      if (startNode && endNode && startNode === endNode) {
-        try {
-          const range = document.createRange();
-          range.setStart(startNode, startNodeOffset);
-          range.setEnd(endNode, endNodeOffset);
-          const parent = startNode.parentElement;
-          if (parent?.dataset?.highlightId) return;
-          const span = document.createElement("span");
-          span.className = `highlight-${h.color} cursor-pointer`;
-          span.dataset.highlightId = h.id;
-          range.surroundContents(span);
-        } catch {}
-      }
-    });
-  }, [article?.content, highlights]);
+  async function handleDeleteFromPanel(hId: string) {
+    if (!article?.id) return;
+    await dbDeleteHighlight(hId);
+    loadHighlights(article.id);
+  }
 
   if (!article) {
     return (
@@ -194,7 +207,7 @@ export default function Reader() {
   return (
     <div className="min-h-screen bg-stone-50">
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-stone-200">
-        <div className="max-w-3xl mx-auto px-6 py-3 flex items-center justify-between">
+        <div className={`max-w-3xl mx-auto px-6 py-3 flex items-center justify-between transition-all duration-300 ${chatOpen ? "mr-[400px]" : ""}`}>
           <Link
             to="/"
             className="flex items-center gap-2 text-stone-500 hover:text-stone-700 font-sans text-sm"
@@ -214,9 +227,7 @@ export default function Reader() {
         </div>
       </header>
 
-      <main
-        className={`transition-all duration-300 ${chatOpen ? "mr-[400px]" : "mr-0"}`}
-      >
+      <main className={`transition-all duration-300 ${chatOpen ? "mr-[400px]" : "mr-0"}`}>
         <div className="max-w-3xl mx-auto px-6 py-10">
           <article>
             <header className="mb-10">
@@ -235,27 +246,13 @@ export default function Reader() {
             <div
               ref={contentRef}
               className="article-content"
-              dangerouslySetInnerHTML={{ __html: article.content }}
+              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
               onMouseUp={handleMouseUp}
               onClick={handleContentClick}
             />
           </article>
 
-          <HighlightsPanel highlights={highlights} onDelete={(hId) => {
-            dbDeleteHighlight(hId).then(() => {
-              if (article?.id) {
-                highlightsApplied.current = false;
-                loadHighlights(article.id);
-              }
-            });
-            // Remove from DOM
-            const span = contentRef.current?.querySelector(`[data-highlight-id="${hId}"]`);
-            if (span) {
-              const parent = span.parentNode;
-              while (span.firstChild) parent?.insertBefore(span.firstChild, span);
-              parent?.removeChild(span);
-            }
-          }} />
+          <HighlightsPanel highlights={highlights} onDelete={handleDeleteFromPanel} />
         </div>
       </main>
 

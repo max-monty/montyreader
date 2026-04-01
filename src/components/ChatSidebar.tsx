@@ -5,9 +5,12 @@ import {
   PanelRightClose,
   PanelRightOpen,
   RotateCcw,
+  Plus,
+  Clock,
+  ChevronDown,
 } from "lucide-react";
-import { getConversation, saveConversation, deleteConversation } from "../db";
-import type { Article, ChatMessage, ModelId } from "../types";
+import { getConversation, listConversations, saveConversation, deleteConversation } from "../db";
+import type { Article, ChatMessage, Conversation, ModelId } from "../types";
 import { MODELS } from "../types";
 
 interface Props {
@@ -23,11 +26,13 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
   const [model, setModel] = useState<ModelId>("claude-sonnet-4-6");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load existing conversation once
+  // Load most recent conversation
   useEffect(() => {
     if (!article.id || loaded) return;
     getConversation(article.id)
@@ -49,6 +54,28 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 300);
   }, [open]);
+
+  async function loadHistory() {
+    if (!article.id) return;
+    try {
+      const convs = await listConversations(article.id);
+      setConversations(convs);
+      setShowHistory(true);
+    } catch {}
+  }
+
+  function selectConversation(conv: Conversation) {
+    setMessages(conv.messages);
+    setModel(conv.model as ModelId);
+    setConversationId(conv.id || null);
+    setShowHistory(false);
+  }
+
+  function startNewChat() {
+    setMessages([]);
+    setConversationId(null);
+    setShowHistory(false);
+  }
 
   async function persistConversation(msgs: ChatMessage[]) {
     if (!article.id) return;
@@ -144,9 +171,7 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
   }
 
   async function clearChat() {
-    if (streaming) {
-      abortRef.current?.abort();
-    }
+    if (streaming) abortRef.current?.abort();
     setMessages([]);
     if (conversationId) {
       await deleteConversation(conversationId).catch(() => {});
@@ -171,9 +196,7 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
     for (const line of lines) {
       if (line.startsWith("```")) {
         if (inCodeBlock) {
-          elements.push(
-            <pre key={key++}><code>{codeLines.join("\n")}</code></pre>
-          );
+          elements.push(<pre key={key++}><code>{codeLines.join("\n")}</code></pre>);
           codeLines = [];
           inCodeBlock = false;
         } else {
@@ -199,17 +222,33 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
     return elements;
   }
 
+  function formatTime(ts: number) {
+    const d = new Date(ts);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    }
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  function getPreview(conv: Conversation): string {
+    const first = conv.messages.find(m => m.role === "user");
+    if (!first) return "Empty conversation";
+    return first.content.length > 60 ? first.content.substring(0, 60) + "..." : first.content;
+  }
+
   return (
     <>
-      {/* Toggle tab — always visible on right edge */}
+      {/* Toggle button — inside the header bar */}
       <button
         onClick={() => onToggle(!open)}
-        className={`fixed top-3 z-50 p-2 rounded-lg transition-all duration-300
+        className={`fixed z-50 p-2 rounded-lg transition-all duration-300
                     font-sans text-xs font-medium flex items-center gap-1.5
                     ${open
-                      ? "right-[408px] bg-white text-stone-500 hover:text-stone-700 border border-stone-200 shadow-sm"
-                      : "right-4 bg-stone-900 text-white hover:bg-stone-800 shadow-lg"
+                      ? "top-[7px] right-[408px] bg-white text-stone-500 hover:text-stone-700 border border-stone-200 shadow-sm"
+                      : "top-[7px] right-3 bg-stone-900 text-white hover:bg-stone-800 shadow-lg"
                     }`}
+        style={{ zIndex: 50 }}
       >
         {open ? <PanelRightClose size={16} /> : <><PanelRightOpen size={16} /> Chat</>}
       </button>
@@ -222,7 +261,23 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-stone-200 shrink-0">
-          <span className="font-sans text-sm font-medium text-stone-700">Chat</span>
+          <div className="flex items-center gap-2">
+            <span className="font-sans text-sm font-medium text-stone-700">Chat</span>
+            <button
+              onClick={loadHistory}
+              className="p-1 text-stone-400 hover:text-stone-600 rounded"
+              title="Chat history"
+            >
+              <Clock size={14} />
+            </button>
+            <button
+              onClick={startNewChat}
+              className="p-1 text-stone-400 hover:text-stone-600 rounded"
+              title="New chat"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <select
               value={model}
@@ -237,14 +292,49 @@ export default function ChatSidebar({ article, open, onToggle }: Props) {
             {messages.length > 0 && (
               <button
                 onClick={clearChat}
-                className="p-1 text-stone-400 hover:text-stone-600 rounded"
-                title="Clear chat"
+                className="p-1 text-stone-400 hover:text-red-500 rounded"
+                title="Delete chat"
               >
                 <RotateCcw size={14} />
               </button>
             )}
           </div>
         </div>
+
+        {/* Chat history dropdown */}
+        {showHistory && (
+          <div className="border-b border-stone-200 bg-stone-50 max-h-64 overflow-y-auto">
+            {conversations.length === 0 ? (
+              <div className="px-4 py-6 text-center text-stone-400 text-xs font-sans">
+                No previous chats
+              </div>
+            ) : (
+              <div className="py-1">
+                {conversations.map((conv) => (
+                  <button
+                    key={conv.id}
+                    onClick={() => selectConversation(conv)}
+                    className={`w-full text-left px-4 py-2.5 hover:bg-stone-100 transition-colors
+                               ${conv.id === conversationId ? "bg-stone-100" : ""}`}
+                  >
+                    <p className="text-xs font-sans text-stone-700 truncate">
+                      {getPreview(conv)}
+                    </p>
+                    <p className="text-[10px] font-sans text-stone-400 mt-0.5">
+                      {formatTime(conv.updatedAt)} · {conv.messages.length} messages
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setShowHistory(false)}
+              className="w-full py-1.5 text-center text-stone-400 hover:text-stone-600 border-t border-stone-200"
+            >
+              <ChevronDown size={14} className="mx-auto rotate-180" />
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
