@@ -88,6 +88,7 @@ export async function addHighlight(highlight: Omit<Highlight, "id" | "userId">):
 export async function listHighlights(articleId: string): Promise<Highlight[]> {
   const q = query(
     col("highlights"),
+    where("userId", "==", uid()),
     where("articleId", "==", articleId),
     orderBy("createdAt", "asc")
   );

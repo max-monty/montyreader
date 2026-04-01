@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import {
   MessageSquare,
   Send,
-  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
   RotateCcw,
 } from "lucide-react";
 import { getConversation, saveConversation, deleteConversation } from "../db";
@@ -11,49 +12,60 @@ import { MODELS } from "../types";
 
 interface Props {
   article: Article;
+  open: boolean;
+  onToggle: (open: boolean) => void;
 }
 
-export default function ChatSidebar({ article }: Props) {
-  const [open, setOpen] = useState(false);
+export default function ChatSidebar({ article, open, onToggle }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [model, setModel] = useState<ModelId>("claude-sonnet-4-6");
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
+  // Load existing conversation once
   useEffect(() => {
-    if (!article.id) return;
-    getConversation(article.id).then((conv) => {
-      if (conv) {
-        setMessages(conv.messages);
-        setModel(conv.model as ModelId);
-        setConversationId(conv.id || null);
-      }
-    });
-  }, [article.id]);
+    if (!article.id || loaded) return;
+    getConversation(article.id)
+      .then((conv) => {
+        if (conv) {
+          setMessages(conv.messages);
+          setModel(conv.model as ModelId);
+          setConversationId(conv.id || null);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [article.id, loaded]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    if (open) inputRef.current?.focus();
+    if (open) setTimeout(() => inputRef.current?.focus(), 300);
   }, [open]);
 
   async function persistConversation(msgs: ChatMessage[]) {
     if (!article.id) return;
-    const now = Date.now();
-    const id = await saveConversation({
-      id: conversationId || undefined,
-      articleId: article.id,
-      messages: msgs,
-      model,
-      createdAt: now,
-      updatedAt: now,
-    });
-    if (!conversationId) setConversationId(id);
+    try {
+      const now = Date.now();
+      const id = await saveConversation({
+        id: conversationId || undefined,
+        articleId: article.id,
+        messages: msgs,
+        model,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (!conversationId) setConversationId(id);
+    } catch (err) {
+      console.error("Failed to save conversation:", err);
+    }
   }
 
   async function sendMessage() {
@@ -65,6 +77,9 @@ export default function ChatSidebar({ article }: Props) {
     setInput("");
     setStreaming(true);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -75,6 +90,7 @@ export default function ChatSidebar({ article }: Props) {
           articleContent: article.textContent,
           articleTitle: article.title,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok) throw new Error("Chat request failed");
@@ -114,22 +130,26 @@ export default function ChatSidebar({ article }: Props) {
       ];
       setMessages(finalMessages);
       await persistConversation(finalMessages);
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === "AbortError") return;
       console.error("Chat error:", err);
-      const errorMessages: ChatMessage[] = [
+      setMessages([
         ...newMessages,
         { role: "assistant", content: "Something went wrong. Please try again." },
-      ];
-      setMessages(errorMessages);
+      ]);
     } finally {
       setStreaming(false);
+      abortRef.current = null;
     }
   }
 
   async function clearChat() {
+    if (streaming) {
+      abortRef.current?.abort();
+    }
     setMessages([]);
     if (conversationId) {
-      await deleteConversation(conversationId);
+      await deleteConversation(conversationId).catch(() => {});
       setConversationId(null);
     }
   }
@@ -152,9 +172,7 @@ export default function ChatSidebar({ article }: Props) {
       if (line.startsWith("```")) {
         if (inCodeBlock) {
           elements.push(
-            <pre key={key++}>
-              <code>{codeLines.join("\n")}</code>
-            </pre>
+            <pre key={key++}><code>{codeLines.join("\n")}</code></pre>
           );
           codeLines = [];
           inCodeBlock = false;
@@ -163,12 +181,7 @@ export default function ChatSidebar({ article }: Props) {
         }
         continue;
       }
-
-      if (inCodeBlock) {
-        codeLines.push(line);
-        continue;
-      }
-
+      if (inCodeBlock) { codeLines.push(line); continue; }
       if (line.trim() === "") {
         elements.push(<br key={key++} />);
       } else {
@@ -180,47 +193,36 @@ export default function ChatSidebar({ article }: Props) {
         );
       }
     }
-
     if (inCodeBlock && codeLines.length) {
-      elements.push(
-        <pre key={key++}>
-          <code>{codeLines.join("\n")}</code>
-        </pre>
-      );
+      elements.push(<pre key={key++}><code>{codeLines.join("\n")}</code></pre>);
     }
-
     return elements;
   }
 
   return (
     <>
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="fixed right-0 top-1/2 -translate-y-1/2 z-50
-                     bg-stone-900 text-white p-2.5 rounded-l-lg shadow-lg
-                     hover:bg-stone-800 transition-colors"
-          title="Open chat"
-        >
-          <MessageSquare size={20} />
-        </button>
-      )}
+      {/* Toggle tab — always visible on right edge */}
+      <button
+        onClick={() => onToggle(!open)}
+        className={`fixed top-3 z-50 p-2 rounded-lg transition-all duration-300
+                    font-sans text-xs font-medium flex items-center gap-1.5
+                    ${open
+                      ? "right-[408px] bg-white text-stone-500 hover:text-stone-700 border border-stone-200 shadow-sm"
+                      : "right-4 bg-stone-900 text-white hover:bg-stone-800 shadow-lg"
+                    }`}
+      >
+        {open ? <PanelRightClose size={16} /> : <><PanelRightOpen size={16} /> Chat</>}
+      </button>
 
+      {/* Sidebar panel */}
       <div
         className={`fixed right-0 top-0 h-full bg-white border-l border-stone-200 shadow-xl
-                     flex flex-col z-40 transition-all duration-300 ease-in-out
-                     ${open ? "w-[400px]" : "w-0 overflow-hidden"}`}
+                     flex flex-col z-40 transition-transform duration-300 ease-in-out w-[400px]
+                     ${open ? "translate-x-0" : "translate-x-full"}`}
       >
+        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-stone-200 shrink-0">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setOpen(false)}
-              className="p-1 text-stone-400 hover:text-stone-600 rounded"
-            >
-              <ChevronRight size={18} />
-            </button>
-            <span className="font-sans text-sm font-medium text-stone-700">Chat</span>
-          </div>
+          <span className="font-sans text-sm font-medium text-stone-700">Chat</span>
           <div className="flex items-center gap-2">
             <select
               value={model}
@@ -229,9 +231,7 @@ export default function ChatSidebar({ article }: Props) {
                          text-stone-600 focus:outline-none focus:ring-1 focus:ring-stone-300"
             >
               {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
+                <option key={m.id} value={m.id}>{m.name}</option>
               ))}
             </select>
             {messages.length > 0 && (
@@ -246,6 +246,7 @@ export default function ChatSidebar({ article }: Props) {
           </div>
         </div>
 
+        {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="text-center py-12 text-stone-400 font-sans text-sm">
@@ -278,6 +279,7 @@ export default function ChatSidebar({ article }: Props) {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Input */}
         <div className="border-t border-stone-200 px-4 py-3 shrink-0">
           <div className="flex items-end gap-2">
             <textarea
@@ -301,8 +303,7 @@ export default function ChatSidebar({ article }: Props) {
               onClick={sendMessage}
               disabled={!input.trim() || streaming}
               className="p-2 bg-stone-900 text-white rounded-lg
-                         hover:bg-stone-800 disabled:opacity-30 disabled:cursor-not-allowed
-                         shrink-0"
+                         hover:bg-stone-800 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
             >
               <Send size={16} />
             </button>
