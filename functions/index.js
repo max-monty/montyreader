@@ -155,6 +155,7 @@ export const api = onRequest(
     timeoutSeconds: 120,
     memory: "512MiB",
     region: "us-central1",
+    invoker: "public",
   },
   app
 );
