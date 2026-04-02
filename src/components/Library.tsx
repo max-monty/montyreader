@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Trash2, BookOpen, ExternalLink, LogOut, Bookmark } from "lucide-react";
 import { listArticles, saveArticle, findArticleByUrl, deleteArticle } from "../db";
@@ -99,6 +99,16 @@ export default function Library() {
     });
   }
 
+  const bookmarkletRef = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    if (!bookmarkletRef.current) return;
+    const origin = window.location.origin;
+    bookmarkletRef.current.setAttribute(
+      "href",
+      `javascript:void(function(){var w=window.open('${origin}/clip?url='+encodeURIComponent(location.href),'_blank');var h=document.documentElement.outerHTML;window.addEventListener('message',function(e){if(e.data&&e.data.type==='reader-clip-ready'){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')}});setTimeout(function(){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')},2000)}())`
+    );
+  }, []);
+
   if (initialLoading) {
     return (
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
@@ -137,10 +147,11 @@ export default function Library() {
             </span>
           </div>
           <a
-            href={`javascript:void(function(){var w=window.open('${window.location.origin}/clip?url='+encodeURIComponent(location.href),'_blank');var h=document.documentElement.outerHTML;window.addEventListener('message',function(e){if(e.data&&e.data.type==='reader-clip-ready'){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')}});setTimeout(function(){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')},2000)}())`}
+            ref={bookmarkletRef}
+            href="#"
             className="px-3 py-1.5 bg-stone-900 text-white rounded font-sans text-xs font-medium
                        hover:bg-stone-800 shrink-0 cursor-grab active:cursor-grabbing"
-            onClick={(e) => { e.preventDefault(); alert("Drag this button to your bookmarks bar"); }}
+            onClick={(e) => { e.preventDefault(); alert("Drag this button to your bookmarks bar — don't click it here."); }}
           >
             + Save to Reader
           </a>
