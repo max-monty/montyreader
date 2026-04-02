@@ -5,46 +5,84 @@ import { saveArticle, findArticleByUrl } from "../db";
 export default function Clip() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState("Waiting for article content...");
+  const [status, setStatus] = useState("Saving article...");
   const handled = useRef(false);
 
   useEffect(() => {
     if (handled.current) return;
 
+    // Listen for postMessage from bookmarklet (it retries every second)
     function onMessage(e: MessageEvent) {
       if (handled.current) return;
       if (e.data?.type !== "reader-clip") return;
+      if (!e.data.html || !e.data.url) return;
       handled.current = true;
       handleClip(e.data);
     }
-
     window.addEventListener("message", onMessage);
 
-    // Signal opener that we're ready to receive
-    if (window.opener) {
-      try {
-        window.opener.postMessage({ type: "reader-clip-ready" }, "*");
-      } catch {}
-    }
-
-    // If no message received after 10s, show fallback
-    const timeout = setTimeout(() => {
-      if (!handled.current) {
-        setStatus("Could not receive article content. Try using the URL input on the Library page instead.");
+    // After 12 seconds with no postMessage, fall back to server-side fetch
+    const url = searchParams.get("url");
+    const fallbackTimeout = setTimeout(() => {
+      if (handled.current) return;
+      handled.current = true;
+      if (url) {
+        handleUrlFetch(url);
+      } else {
+        setStatus("No article data received. Try again.");
       }
-    }, 10000);
+    }, 12000);
 
     return () => {
       window.removeEventListener("message", onMessage);
-      clearTimeout(timeout);
+      clearTimeout(fallbackTimeout);
     };
   }, []);
 
-  async function handleClip(data: {
-    url: string;
-    html: string;
-    title?: string;
-  }) {
+  async function handleUrlFetch(url: string) {
+    setStatus("Fetching article...");
+    try {
+      // Check if already saved
+      try {
+        const existing = await findArticleByUrl(url);
+        if (existing) {
+          navigate(`/read/${existing.id}`, { replace: true });
+          return;
+        }
+      } catch {}
+
+      const res = await fetch("/api/fetch-article", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to fetch article");
+      }
+
+      const data = await res.json();
+      const id = await saveArticle({
+        url,
+        title: data.title,
+        byline: data.byline,
+        content: data.content,
+        textContent: data.textContent,
+        excerpt: data.excerpt,
+        siteName: data.siteName,
+        publishedTime: data.publishedTime,
+        savedAt: Date.now(),
+      });
+
+      navigate(`/read/${id}`, { replace: true });
+    } catch (err: any) {
+      console.error("Fetch error:", err);
+      setStatus(`Could not fetch article: ${err.message}`);
+    }
+  }
+
+  async function handleClip(data: { url: string; html: string; title?: string }) {
     setStatus("Parsing article...");
 
     try {

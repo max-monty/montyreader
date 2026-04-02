@@ -102,11 +102,24 @@ export default function Library() {
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
   useEffect(() => {
     if (!bookmarkletRef.current) return;
-    const origin = window.location.origin;
-    bookmarkletRef.current.setAttribute(
-      "href",
-      `javascript:void(function(){var w=window.open('${origin}/clip?url='+encodeURIComponent(location.href),'_blank');var h=document.documentElement.outerHTML;window.addEventListener('message',function(e){if(e.data&&e.data.type==='reader-clip-ready'){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')}});setTimeout(function(){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')},2000)}())`
-    );
+    const origin = "https://monty-reader.web.app";
+    // Bookmarklet: grab page HTML, open /clip, send data via postMessage with retries
+    const code = [
+      `javascript:void(function(){`,
+      `var h=document.documentElement.outerHTML;`,
+      `var u=location.href;`,
+      `var t=document.title;`,
+      `var w=window.open('${origin}/clip?url='+encodeURIComponent(u),'_blank');`,
+      `if(!w){alert('Please allow popups for this site');return}`,
+      `var msg={type:'reader-clip',url:u,html:h,title:t};`,
+      `var i=0;`,
+      `var iv=setInterval(function(){`,
+      `try{w.postMessage(msg,'${origin}')}catch(e){}`,
+      `if(++i>15)clearInterval(iv)`,
+      `},1000);`,
+      `}())`,
+    ].join("");
+    bookmarkletRef.current.setAttribute("href", code);
   }, []);
 
   if (initialLoading) {
