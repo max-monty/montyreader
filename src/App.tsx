@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { type User } from "firebase/auth";
 import { isConfigured, onAuthChange, signInWithGoogle, signInAsGuest } from "./firebase";
 import Library from "./components/Library";
+import Clip from "./components/Clip";
 import Reader from "./components/Reader";
 
 function SetupScreen() {
@@ -117,6 +118,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Library />} />
         <Route path="/read/:id" element={<Reader />} />
+        <Route path="/clip" element={<Clip />} />
       </Routes>
     </BrowserRouter>
   );

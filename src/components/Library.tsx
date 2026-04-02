@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2, BookOpen, ExternalLink, LogOut } from "lucide-react";
+import { Plus, Trash2, BookOpen, ExternalLink, LogOut, Bookmark } from "lucide-react";
 import { listArticles, saveArticle, findArticleByUrl, deleteArticle } from "../db";
 import { signOut, getCurrentUser } from "../firebase";
 import type { Article } from "../types";
@@ -128,6 +128,24 @@ export default function Library() {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-8">
+        {/* Bookmarklet */}
+        <div className="mb-6 flex items-center justify-between px-4 py-3 bg-white border border-stone-200 rounded-lg">
+          <div className="flex items-center gap-3">
+            <Bookmark size={14} className="text-stone-400" />
+            <span className="font-sans text-xs text-stone-500">
+              Drag this to your bookmarks bar to save articles from any site (including paywalled):
+            </span>
+          </div>
+          <a
+            href={`javascript:void(function(){var w=window.open('${window.location.origin}/clip?url='+encodeURIComponent(location.href),'_blank');var h=document.documentElement.outerHTML;window.addEventListener('message',function(e){if(e.data&&e.data.type==='reader-clip-ready'){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')}});setTimeout(function(){w.postMessage({type:'reader-clip',url:location.href,html:h,title:document.title},'*')},2000)}())`}
+            className="px-3 py-1.5 bg-stone-900 text-white rounded font-sans text-xs font-medium
+                       hover:bg-stone-800 shrink-0 cursor-grab active:cursor-grabbing"
+            onClick={(e) => { e.preventDefault(); alert("Drag this button to your bookmarks bar"); }}
+          >
+            + Save to Reader
+          </a>
+        </div>
+
         <div className="flex gap-3 mb-8">
           <input
             type="url"
