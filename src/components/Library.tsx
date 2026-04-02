@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Trash2, BookOpen, ExternalLink, LogOut, Bookmark } from "lucide-react";
 import { listArticles, saveArticle, findArticleByUrl, deleteArticle } from "../db";
-import { signOut, getCurrentUser } from "../firebase";
+import { signOut, getCurrentUser, getCurrentUserId } from "../firebase";
 import type { Article } from "../types";
 
 export default function Library() {
@@ -103,20 +103,25 @@ export default function Library() {
   useEffect(() => {
     if (!bookmarkletRef.current) return;
     const origin = "https://monty-reader.web.app";
-    // Bookmarklet: grab page HTML, open /clip, send data via postMessage with retries
+    let uid = "";
+    try { uid = getCurrentUserId(); } catch {}
+    // Bookmarklet: grab page HTML, POST to /api/clip, navigate to reader
     const code = [
       `javascript:void(function(){`,
-      `var h=document.documentElement.outerHTML;`,
-      `var u=location.href;`,
-      `var t=document.title;`,
-      `var w=window.open('${origin}/clip?url='+encodeURIComponent(u),'_blank');`,
-      `if(!w){alert('Please allow popups for this site');return}`,
-      `var msg={type:'reader-clip',url:u,html:h,title:t};`,
-      `var i=0;`,
-      `var iv=setInterval(function(){`,
-      `try{w.postMessage(msg,'${origin}')}catch(e){}`,
-      `if(++i>15)clearInterval(iv)`,
-      `},1000);`,
+      `var b=document.createElement('div');`,
+      `b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:999999;background:#1c1917;color:white;padding:12px 16px;font:14px system-ui;text-align:center';`,
+      `b.textContent='Saving to Reader...';`,
+      `document.body.appendChild(b);`,
+      `fetch('${origin}/api/clip',{`,
+      `method:'POST',`,
+      `headers:{'Content-Type':'application/json'},`,
+      `body:JSON.stringify({html:document.documentElement.outerHTML,url:location.href,userId:'${uid}'})`,
+      `}).then(function(r){return r.json()}).then(function(d){`,
+      `if(d.id){window.open('${origin}/read/'+d.id,'_blank')}`,
+      `else{b.textContent='Error: '+(d.error||'Unknown');setTimeout(function(){b.remove()},3000)}`,
+      `}).catch(function(e){`,
+      `b.textContent='Error: '+e.message;setTimeout(function(){b.remove()},3000)`,
+      `})`,
       `}())`,
     ].join("");
     bookmarkletRef.current.setAttribute("href", code);

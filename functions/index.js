@@ -1,11 +1,15 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
+import { initializeApp } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 import express from "express";
 import cors from "cors";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import Anthropic from "@anthropic-ai/sdk";
 
+initializeApp();
+const db = getFirestore();
 const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 const app = express();
@@ -94,6 +98,61 @@ app.post("/api/fetch-article", async (req, res) => {
   } catch (error) {
     console.error("Fetch error:", error);
     res.status(500).json({ error: error.message || "Failed to fetch article" });
+  }
+});
+
+// Clip: accept raw HTML from bookmarklet, parse, save to Firestore
+app.post("/api/clip", async (req, res) => {
+  try {
+    const { html, url, userId } = req.body;
+    if (!html || !url || !userId) {
+      res.status(400).json({ error: "html, url, and userId are required" });
+      return;
+    }
+
+    // Parse with Readability
+    const dom = new JSDOM(html, { url });
+    const reader = new Readability(dom.window.document);
+    const article = reader.parse();
+
+    if (!article) {
+      res.status(422).json({ error: "Could not parse article content" });
+      return;
+    }
+
+    // Resolve relative URLs
+    const contentDom = new JSDOM(article.content);
+    contentDom.window.document.querySelectorAll("img[src]").forEach((img) => {
+      const src = img.getAttribute("src");
+      if (src && !src.startsWith("http") && !src.startsWith("data:")) {
+        try { img.setAttribute("src", new URL(src, url).href); } catch {}
+      }
+    });
+    contentDom.window.document.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href");
+      if (href && !href.startsWith("http") && !href.startsWith("#") && !href.startsWith("mailto:")) {
+        try { a.setAttribute("href", new URL(href, url).href); } catch {}
+      }
+    });
+
+    // Save to Firestore
+    const docRef = await db.collection("articles").add({
+      url,
+      title: article.title || "Untitled",
+      byline: article.byline || null,
+      content: contentDom.window.document.body.innerHTML,
+      textContent: article.textContent,
+      excerpt: article.excerpt || null,
+      siteName: article.siteName || null,
+      publishedTime: article.publishedTime || null,
+      userId,
+      savedAt: Date.now(),
+    });
+
+    res.json({ id: docRef.id });
+  } catch (error) {
+    console.error("Clip error:", error);
+    res.status(500).json({ error: error.message || "Failed to clip article" });
   }
 });
 
