@@ -102,7 +102,7 @@ export default function Library() {
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
   useEffect(() => {
     if (!bookmarkletRef.current) return;
-    const origin = "https://monty-reader.web.app";
+    const origin = window.location.origin;
     let uid = "";
     try { uid = getCurrentUserId(); } catch {}
     // Bookmarklet: grab page HTML, POST to /api/clip, navigate to reader
