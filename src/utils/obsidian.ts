@@ -18,7 +18,8 @@ const VAULT_KEY = "vault";
 const SUBFOLDER_KEY = "vault-subfolder";
 
 export function isFileSystemAccessSupported(): boolean {
-  return typeof (window as any).showDirectoryPicker === "function";
+  if (typeof window === "undefined") return false;
+  return "showDirectoryPicker" in window;
 }
 
 function openIdb(): Promise<IDBDatabase> {

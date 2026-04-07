@@ -97,7 +97,7 @@ export default function Settings() {
 
           {!supported && (
             <div className="mt-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-              Your browser doesn't support the File System Access API. Use Chrome, Edge, Brave, or Arc to enable vault sync.
+              The File System Access API isn't available in this context. It requires a Chromium-based browser (Chrome, Edge, Brave, Arc, Opera) on a secure origin (https or localhost). If you're on Brave and seeing this, make sure you're on the deployed https site (not http) and that Brave Shields isn't blocking it for this site.
             </div>
           )}
 

@@ -98,24 +98,21 @@ export async function addHighlight(highlight: Omit<Highlight, "id" | "userId">):
 }
 
 export async function listHighlights(articleId: string): Promise<Highlight[]> {
-  const q = query(
-    col("highlights"),
-    where("userId", "==", uid()),
-    where("articleId", "==", articleId),
-    orderBy("createdAt", "asc")
-  );
+  // Single-field query (no composite index needed) — sort/filter client-side.
+  const q = query(col("highlights"), where("userId", "==", uid()));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Highlight);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Highlight)
+    .filter((h) => h.articleId === articleId)
+    .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export async function listAllHighlights(): Promise<Highlight[]> {
-  const q = query(
-    col("highlights"),
-    where("userId", "==", uid()),
-    orderBy("createdAt", "desc")
-  );
+  const q = query(col("highlights"), where("userId", "==", uid()));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Highlight);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Highlight)
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function deleteHighlight(id: string): Promise<void> {
@@ -152,24 +149,21 @@ export async function deleteNote(id: string): Promise<void> {
 }
 
 export async function listNotes(articleId: string): Promise<Note[]> {
-  const q = query(
-    col("notes"),
-    where("userId", "==", uid()),
-    where("articleId", "==", articleId),
-    orderBy("createdAt", "asc")
-  );
+  // Single-field query (no composite index needed) — filter/sort client-side.
+  const q = query(col("notes"), where("userId", "==", uid()));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Note)
+    .filter((n) => n.articleId === articleId)
+    .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export async function listAllNotes(): Promise<Note[]> {
-  const q = query(
-    col("notes"),
-    where("userId", "==", uid()),
-    orderBy("updatedAt", "desc")
-  );
+  const q = query(col("notes"), where("userId", "==", uid()));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Note)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 // Conversations
