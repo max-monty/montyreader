@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, List, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, List, X, StickyNote, Trash2, Check, CornerDownLeft } from "lucide-react";
 // @ts-ignore — epubjs has no types in many setups
 import ePub from "epubjs";
 import { getDocumentUrl } from "../utils/storage";
@@ -10,6 +10,7 @@ import {
   listHighlights,
   deleteHighlight as dbDeleteHighlight,
   listNotes,
+  addNote,
 } from "../db";
 import type { Article, Highlight, Note } from "../types";
 import RightSidebar from "./RightSidebar";
@@ -32,6 +33,9 @@ export default function EpubReader({ article }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bookText, setBookText] = useState<string>("");
+  const [menuTarget, setMenuTarget] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [noteComposer, setNoteComposer] = useState<{ highlightId: string; x: number; y: number } | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
 
   const reloadHighlights = useCallback(async () => {
     if (!article.id) return;
@@ -189,11 +193,19 @@ export default function EpubReader({ article }: Props) {
     for (const h of highlights) {
       if (!h.cfi || seen.has(h.id)) continue;
       try {
+        const cb = (e: any) => {
+          // Translate iframe-local coords to outer viewport coords.
+          const iframe = viewerRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
+          const r = iframe?.getBoundingClientRect();
+          const x = (r?.left || 0) + (e?.clientX || 0);
+          const y = (r?.top || 0) + (e?.clientY || 0);
+          setMenuTarget({ id: h.id, x, y });
+        };
         rendition.annotations.add(
           "highlight",
           h.cfi,
           { id: h.id },
-          undefined,
+          cb,
           "epub-hl",
           { fill: "#fde047", "fill-opacity": "0.4", "mix-blend-mode": "multiply" }
         );
@@ -330,6 +342,88 @@ export default function EpubReader({ article }: Props) {
                   {item.label}
                 </button>
               ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {menuTarget && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenuTarget(null)} />
+          <div
+            className="fixed z-50 flex items-center gap-1 bg-stone-900 text-white rounded-lg shadow-lg p-1"
+            style={{ left: menuTarget.x, top: menuTarget.y - 42, transform: "translateX(-50%)" }}
+          >
+            <button
+              onClick={() => {
+                const h = highlights.find((x) => x.id === menuTarget.id);
+                if (h) jumpToHighlight(h);
+                setMenuTarget(null);
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
+            >
+              <CornerDownLeft size={12} /> Jump
+            </button>
+            <button
+              onClick={() => {
+                setNoteComposer({ highlightId: menuTarget.id, x: menuTarget.x, y: menuTarget.y });
+                setNoteDraft("");
+                setMenuTarget(null);
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
+            >
+              <StickyNote size={12} /> Note
+            </button>
+            <button
+              onClick={() => {
+                handleDeleteHighlight(menuTarget.id);
+                setMenuTarget(null);
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-red-600 rounded"
+            >
+              <Trash2 size={12} /> Delete
+            </button>
+          </div>
+        </>
+      )}
+
+      {noteComposer && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setNoteComposer(null)} />
+          <div
+            className="fixed z-50 bg-white border border-stone-200 rounded-lg shadow-xl p-3 w-72"
+            style={{ left: noteComposer.x, top: noteComposer.y + 10, transform: "translateX(-50%)" }}
+          >
+            <textarea
+              autoFocus
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  if (!noteDraft.trim()) { setNoteComposer(null); return; }
+                  await addNote({ articleId: article.id, highlightId: noteComposer.highlightId, body: noteDraft.trim() });
+                  setNoteComposer(null);
+                  setNoteDraft("");
+                  reloadNotes();
+                }
+                if (e.key === "Escape") setNoteComposer(null);
+              }}
+              rows={3}
+              placeholder="Add a note... (Cmd+Enter to save)"
+              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-200 rounded text-sm font-sans focus:outline-none focus:ring-1 focus:ring-stone-300 resize-none"
+            />
+            <div className="flex justify-end gap-1 mt-2">
+              <button onClick={() => setNoteComposer(null)} className="p-1 text-stone-400 hover:text-stone-600 rounded"><X size={14} /></button>
+              <button
+                onClick={async () => {
+                  if (!noteDraft.trim()) { setNoteComposer(null); return; }
+                  await addNote({ articleId: article.id, highlightId: noteComposer.highlightId, body: noteDraft.trim() });
+                  setNoteComposer(null);
+                  setNoteDraft("");
+                  reloadNotes();
+                }}
+                className="p-1 text-stone-400 hover:text-green-600 rounded"
+              ><Check size={14} /></button>
             </div>
           </div>
         </>
