@@ -207,7 +207,7 @@ export default function EpubReader({ article }: Props) {
           { id: h.id },
           cb,
           "epub-hl",
-          { fill: "#fde047", "fill-opacity": "0.4", "mix-blend-mode": "multiply" }
+          { fill: "#fde047", "fill-opacity": "0.4", "mix-blend-mode": "multiply", "pointer-events": "fill", cursor: "pointer" }
         );
         seen.add(h.id);
       } catch (err) {
@@ -277,10 +277,16 @@ export default function EpubReader({ article }: Props) {
 
   async function handleDeleteHighlight(id: string) {
     const target = highlights.find((h) => h.id === id);
-    await dbDeleteHighlight(id);
+    // Optimistic UI update so the sidebar list reflects the change immediately.
+    setHighlights((prev) => prev.filter((h) => h.id !== id));
     if (target?.cfi) {
       try { renditionRef.current?.annotations.remove(target.cfi, "highlight"); } catch {}
       annotatedRef.current.delete(id);
+    }
+    try {
+      await dbDeleteHighlight(id);
+    } catch (err) {
+      console.error("Failed to delete highlight:", err);
     }
     reloadHighlights();
     reloadNotes();
