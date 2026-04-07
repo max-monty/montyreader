@@ -350,16 +350,6 @@ export default function Reader() {
             }}
           >
             <button
-              onClick={() => {
-                jumpToHighlight({ id: menuTarget.id } as Highlight);
-                setMenuTarget(null);
-              }}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
-              title="Jump to highlight"
-            >
-              <CornerDownLeft size={12} /> Jump
-            </button>
-            <button
               onClick={() => openNoteComposer(menuTarget)}
               className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
               title="Add a note"

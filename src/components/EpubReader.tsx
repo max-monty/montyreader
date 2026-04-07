@@ -489,16 +489,6 @@ export default function EpubReader({ article }: Props) {
           >
             <button
               onClick={() => {
-                const h = highlights.find((x) => x.id === menuTarget.id);
-                if (h) jumpToHighlight(h);
-                setMenuTarget(null);
-              }}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
-            >
-              <CornerDownLeft size={12} /> Jump
-            </button>
-            <button
-              onClick={() => {
                 setNoteComposer({ highlightId: menuTarget.id, x: menuTarget.x, y: menuTarget.y });
                 setNoteDraft("");
                 setMenuTarget(null);
