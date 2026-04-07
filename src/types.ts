@@ -54,6 +54,16 @@ export interface Note {
   updatedAt: number;
 }
 
+export interface VocabEntry {
+  id: string;
+  userId?: string;
+  articleId?: string | null;
+  word: string;
+  definition: string;
+  context?: string | null;
+  createdAt: number;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

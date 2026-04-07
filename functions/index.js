@@ -270,6 +270,42 @@ ${articleContent}`;
   }
 });
 
+// Quick dictionary lookup powered by Claude Haiku.
+app.post("/api/define", async (req, res) => {
+  try {
+    const { word, context } = req.body;
+    if (!word || typeof word !== "string") {
+      res.status(400).json({ error: "word is required" });
+      return;
+    }
+    const cleaned = word.trim().slice(0, 64);
+    if (!cleaned) { res.status(400).json({ error: "word is required" }); return; }
+
+    const anthropic = new Anthropic({ apiKey: anthropicApiKey.value() });
+
+    const userMsg = context
+      ? `Define the word "${cleaned}" as it is used in this sentence:\n\n"${String(context).slice(0, 500)}"\n\nGive a concise dictionary-style definition (1-2 short sentences). If the word has multiple meanings, only give the meaning that fits the context. No preamble.`
+      : `Define the word "${cleaned}" with a concise dictionary-style definition (1-2 short sentences). No preamble.`;
+
+    const result = await anthropic.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 200,
+      messages: [{ role: "user", content: userMsg }],
+    });
+
+    const text = (result?.content || [])
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+
+    res.json({ word: cleaned, definition: text });
+  } catch (error) {
+    console.error("Define error:", error);
+    res.status(500).json({ error: error.message || "Failed to define word" });
+  }
+});
+
 export const api = onRequest(
   {
     secrets: [anthropicApiKey],

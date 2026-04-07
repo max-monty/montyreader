@@ -146,7 +146,8 @@ function ChatTab({
   sections?: BookSection[];
   currentSectionId?: string | null;
 }) {
-  const isBook = !!sections && sections.length > 0;
+  const isBook = article.kind === "epub";
+  const sectionsReady = !!sections && sections.length > 0;
   const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
   const [userTouchedSections, setUserTouchedSections] = useState(false);
   const [showSectionPicker, setShowSectionPicker] = useState(false);
@@ -154,11 +155,11 @@ function ChatTab({
   // Default selection follows the current section unless the user manually
   // edited the picker.
   useEffect(() => {
-    if (!isBook || userTouchedSections) return;
+    if (!sectionsReady || userTouchedSections) return;
     if (currentSectionId) {
       setSelectedSectionIds(new Set([currentSectionId]));
     }
-  }, [isBook, currentSectionId, userTouchedSections]);
+  }, [sectionsReady, currentSectionId, userTouchedSections]);
 
   function toggleSection(id: string) {
     setUserTouchedSections(true);
@@ -453,6 +454,10 @@ function ChatTab({
           </button>
           {showSectionPicker && (
             <div className="mt-2 border border-stone-200 rounded-lg bg-white max-h-72 overflow-y-auto">
+              {!sectionsReady ? (
+                <div className="px-3 py-3 text-center text-[11px] font-sans text-stone-400">Loading book sections…</div>
+              ) : (
+              <>
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-stone-100 sticky top-0 bg-white">
                 <button onClick={resetToCurrent} className="text-[11px] font-sans text-stone-500 hover:text-stone-900">Current only</button>
                 <div className="flex items-center gap-2">
@@ -474,6 +479,8 @@ function ChatTab({
                   </label>
                 );
               })}
+              </>
+              )}
             </div>
           )}
         </div>

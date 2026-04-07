@@ -14,6 +14,8 @@ import {
 } from "../db";
 import type { Article, Highlight, Note } from "../types";
 import RightSidebar, { type BookSection } from "./RightSidebar";
+import VocabPopup from "./VocabPopup";
+import { wordAtPoint } from "../utils/wordAtPoint";
 
 interface Props {
   article: Article;
@@ -37,6 +39,7 @@ export default function EpubReader({ article }: Props) {
   const [menuTarget, setMenuTarget] = useState<{ id: string; x: number; y: number } | null>(null);
   const [noteComposer, setNoteComposer] = useState<{ highlightId: string; x: number; y: number } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+  const [vocab, setVocab] = useState<{ word: string; context: string; x: number; y: number } | null>(null);
 
   const reloadHighlights = useCallback(async () => {
     if (!article.id) return;
@@ -126,6 +129,23 @@ export default function EpubReader({ article }: Props) {
           if (href) setCurrentSectionId(href);
         });
 
+        // Cmd/Ctrl-click inside the iframe → vocab lookup for the word.
+        rendition.hooks.content.register((contents: any) => {
+          const doc: Document = contents.document;
+          doc.addEventListener("click", (e: MouseEvent) => {
+            if (!(e.metaKey || e.ctrlKey)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const hit = wordAtPoint(doc, e.clientX, e.clientY);
+            if (!hit) return;
+            const iframe = viewerRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
+            const r = iframe?.getBoundingClientRect();
+            const x = (r?.left || 0) + e.clientX;
+            const y = (r?.top || 0) + e.clientY;
+            setVocab({ word: hit.word, context: hit.context, x, y });
+          });
+        });
+
         // Capture text selections inside the EPUB iframe → save as highlight.
         rendition.on("selected", async (cfiRange: string, contents: any) => {
           try {
@@ -154,6 +174,7 @@ export default function EpubReader({ article }: Props) {
         // pick which sections to send as context. Don't block UI.
         (async () => {
           try {
+            await book.opened;
             const items: any[] = book.spine?.spineItems || [];
             // Build a label index from the TOC (href → label).
             const tocLabels = new Map<string, string>();
@@ -176,9 +197,37 @@ export default function EpubReader({ article }: Props) {
             for (const item of items) {
               i++;
               try {
-                const doc = await item.load(book.load.bind(book));
-                const text = (doc?.body?.textContent || "").trim();
-                item.unload();
+                let text = "";
+                // 1) Most reliable for buffer-backed books: read raw xhtml
+                //    from the in-memory archive and parse it.
+                try {
+                  const url = item.url || item.href;
+                  if (book.archive && url && typeof book.archive.getText === "function") {
+                    const xhtml = await book.archive.getText(url);
+                    if (xhtml) {
+                      const parsed = new DOMParser().parseFromString(xhtml, "application/xhtml+xml");
+                      text = (parsed?.documentElement?.textContent || "").trim();
+                      // Some EPUBs are not strict xhtml; fall back to text/html.
+                      if (!text) {
+                        const parsed2 = new DOMParser().parseFromString(xhtml, "text/html");
+                        text = (parsed2?.body?.textContent || parsed2?.documentElement?.textContent || "").trim();
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.warn("archive.getText failed:", err);
+                }
+                // 2) Fallback to spineItem.load
+                if (!text) {
+                  try {
+                    const doc: any = await item.load(book.load.bind(book));
+                    text = (doc?.body?.textContent || doc?.documentElement?.textContent || "").trim();
+                  } catch (err) {
+                    console.warn("item.load failed:", err);
+                  } finally {
+                    try { item.unload(); } catch {}
+                  }
+                }
                 if (!text) continue;
                 const href = String(item.href || "");
                 const path = href.split("#")[0];
@@ -192,8 +241,11 @@ export default function EpubReader({ article }: Props) {
                 }
                 if (!label) label = `Section ${i}`;
                 collected.push({ id: href, label, text });
-              } catch {}
+              } catch (err) {
+                console.warn("Failed to extract section:", err);
+              }
             }
+            console.log(`[EpubReader] extracted ${collected.length} sections`);
             if (!cancelled) setSections(collected);
           } catch (err) {
             console.warn("Failed to extract book sections:", err);
@@ -476,6 +528,17 @@ export default function EpubReader({ article }: Props) {
             </div>
           </div>
         </>
+      )}
+
+      {vocab && (
+        <VocabPopup
+          word={vocab.word}
+          context={vocab.context}
+          articleId={article.id}
+          x={vocab.x}
+          y={vocab.y}
+          onClose={() => setVocab(null)}
+        />
       )}
 
       <RightSidebar

@@ -14,6 +14,8 @@ import type { Article, Highlight, Note } from "../types";
 import RightSidebar from "./RightSidebar";
 import PdfReader from "./PdfReader";
 import EpubReader from "./EpubReader";
+import VocabPopup from "./VocabPopup";
+import { wordAtPoint } from "../utils/wordAtPoint";
 
 // Inject highlight marks into article HTML by matching text in the text-only content
 function applyHighlightsToHtml(html: string, highlights: Highlight[]): string {
@@ -90,6 +92,7 @@ export default function Reader() {
   const [noteComposer, setNoteComposer] = useState<{ highlightId: string; x: number; y: number } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
+  const [vocab, setVocab] = useState<{ word: string; context: string; x: number; y: number } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -197,6 +200,16 @@ export default function Reader() {
   }
 
   function handleContentClick(e: React.MouseEvent) {
+    // Cmd/Ctrl-click → vocab lookup for the word under the cursor.
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      const hit = wordAtPoint(document, e.clientX, e.clientY);
+      if (hit) {
+        setVocab({ word: hit.word, context: hit.context, x: e.clientX, y: e.clientY });
+      }
+      return;
+    }
     const target = (e.target as HTMLElement).closest("[data-highlight-id]") as HTMLElement | null;
     if (target) {
       e.preventDefault();
@@ -406,6 +419,17 @@ export default function Reader() {
             </div>
           </div>
         </>
+      )}
+
+      {vocab && (
+        <VocabPopup
+          word={vocab.word}
+          context={vocab.context}
+          articleId={article.id}
+          x={vocab.x}
+          y={vocab.y}
+          onClose={() => setVocab(null)}
+        />
       )}
 
       <RightSidebar

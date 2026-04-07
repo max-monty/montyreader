@@ -12,7 +12,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { firestore, getCurrentUserId } from "./firebase";
-import type { Article, Highlight, Conversation, Note } from "./types";
+import type { Article, Highlight, Conversation, Note, VocabEntry } from "./types";
 import { deleteDocument } from "./utils/storage";
 
 function getDb() {
@@ -177,6 +177,30 @@ export async function listAllNotes(): Promise<Note[]> {
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as Note)
     .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+// Vocab
+export async function addVocab(entry: Omit<VocabEntry, "id" | "userId" | "createdAt"> & { createdAt?: number }): Promise<string> {
+  const ref = await addDoc(col("vocab"), {
+    ...entry,
+    articleId: entry.articleId ?? null,
+    context: entry.context ?? null,
+    userId: uid(),
+    createdAt: entry.createdAt ?? Date.now(),
+  });
+  return ref.id;
+}
+
+export async function listAllVocab(): Promise<VocabEntry[]> {
+  const q = query(col("vocab"), where("userId", "==", uid()));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as VocabEntry)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function deleteVocab(id: string): Promise<void> {
+  await deleteDoc(doc(getDb(), "vocab", id));
 }
 
 // Conversations

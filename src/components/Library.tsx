@@ -16,6 +16,7 @@ import {
   Download,
   Copy,
   Check,
+  Languages,
 } from "lucide-react";
 import {
   listArticles,
@@ -26,18 +27,21 @@ import {
   listAllNotes,
   listHighlights,
   listNotes,
+  listAllVocab,
+  deleteVocab,
 } from "../db";
 import { signOut, getCurrentUser } from "../firebase";
-import type { Article, Highlight, Note } from "../types";
+import type { Article, Highlight, Note, VocabEntry } from "../types";
 import { uploadDocument } from "../utils/storage";
 import { articleToMarkdown, downloadText, slugify } from "../utils/markdown";
 
-type LibTab = "all" | "highlights" | "notes";
+type LibTab = "all" | "highlights" | "notes" | "vocab";
 
 export default function Library() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [allHighlights, setAllHighlights] = useState<Highlight[]>([]);
   const [allNotes, setAllNotes] = useState<Note[]>([]);
+  const [allVocab, setAllVocab] = useState<VocabEntry[]>([]);
   const [tab, setTab] = useState<LibTab>("all");
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -58,14 +62,16 @@ export default function Library() {
 
   async function loadAll() {
     try {
-      const [a, h, n] = await Promise.all([
+      const [a, h, n, v] = await Promise.all([
         listArticles(),
         listAllHighlights().catch(() => [] as Highlight[]),
         listAllNotes().catch(() => [] as Note[]),
+        listAllVocab().catch(() => [] as VocabEntry[]),
       ]);
       setArticles(a);
       setAllHighlights(h);
       setAllNotes(n);
+      setAllVocab(v);
     } catch (err) {
       console.error("Failed to load library:", err);
     } finally {
@@ -399,6 +405,7 @@ export default function Library() {
           <LibTabBtn id="all"        active={tab} onClick={setTab} icon={<BookOpen size={13} />}    label={`Library${articles.length ? ` (${articles.length})` : ""}`} />
           <LibTabBtn id="highlights" active={tab} onClick={setTab} icon={<Highlighter size={13} />} label={`Highlights${allHighlights.length ? ` (${allHighlights.length})` : ""}`} />
           <LibTabBtn id="notes"      active={tab} onClick={setTab} icon={<StickyNote size={13} />}  label={`Notes${allNotes.length ? ` (${allNotes.length})` : ""}`} />
+          <LibTabBtn id="vocab"      active={tab} onClick={setTab} icon={<Languages size={13} />}  label={`Vocab${allVocab.length ? ` (${allVocab.length})` : ""}`} />
         </div>
 
         {tab === "all" && (
@@ -523,6 +530,46 @@ export default function Library() {
                       <span>{formatDate(n.updatedAt)}</span>
                     </div>
                   </button>
+                );
+              })}
+            </div>
+          )
+        )}
+        {tab === "vocab" && (
+          allVocab.length === 0 ? (
+            <EmptyState icon={<Languages size={42} />} title="No vocab yet" hint="Cmd/Ctrl-click any word in an article or book to look it up." />
+          ) : (
+            <div className="space-y-3">
+              {allVocab.map((v) => {
+                const a = articleById(v.articleId || null);
+                return (
+                  <div key={v.id} className="group bg-white border border-stone-200 rounded-lg p-4 hover:border-stone-300 hover:shadow-sm transition-all">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-sans font-semibold text-stone-900 text-sm">{v.word}</span>
+                        </div>
+                        <p className="text-sm text-stone-700 leading-relaxed font-sans whitespace-pre-wrap">{v.definition}</p>
+                        {v.context && (
+                          <p className="text-xs text-stone-500 italic mt-2 border-l-2 border-stone-200 pl-2 line-clamp-2">{v.context}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 text-xs text-stone-400 font-sans">
+                          {a && (
+                            <button onClick={() => navigate(`/read/${a.id}`)} className="truncate hover:text-stone-700">{a.title}</button>
+                          )}
+                          {a && <span>·</span>}
+                          <span>{formatDate(v.createdAt)}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => { await deleteVocab(v.id); loadAll(); }}
+                        className="p-1.5 text-stone-400 hover:text-red-500 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
