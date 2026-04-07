@@ -26,6 +26,7 @@ export default function EpubReader({ article }: Props) {
   const renditionRef = useRef<any>(null);
   const bookRef = useRef<any>(null);
   const annotatedRef = useRef<Set<string>>(new Set());
+  const highlightsRef = useRef<Highlight[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [toc, setToc] = useState<{ href: string; label: string }[]>([]);
@@ -130,19 +131,38 @@ export default function EpubReader({ article }: Props) {
         });
 
         // Cmd/Ctrl-click inside the iframe → vocab lookup for the word.
+        // Plain click on a highlight rect → open the highlight menu (epubjs's
+        // own annotation click cb is unreliable across sections, so we route
+        // it ourselves by walking up to the wrapping <g class="epub-hl">).
         rendition.hooks.content.register((contents: any) => {
           const doc: Document = contents.document;
           doc.addEventListener("click", (e: MouseEvent) => {
-            if (!(e.metaKey || e.ctrlKey)) return;
+            if (e.metaKey || e.ctrlKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              const hit = wordAtPoint(doc, e.clientX, e.clientY);
+              if (!hit) return;
+              const iframe = viewerRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
+              const r = iframe?.getBoundingClientRect();
+              const x = (r?.left || 0) + e.clientX;
+              const y = (r?.top || 0) + e.clientY;
+              setVocab({ word: hit.word, context: hit.context, x, y });
+              return;
+            }
+            const target = e.target as Element | null;
+            const g = target?.closest?.("g.epub-hl") as SVGGElement | null;
+            if (!g) return;
+            const hid = g.getAttribute("data-hl-id") || "";
+            const h = highlightsRef.current.find((x) => x.id === hid);
+            if (!h) return;
             e.preventDefault();
             e.stopPropagation();
-            const hit = wordAtPoint(doc, e.clientX, e.clientY);
-            if (!hit) return;
             const iframe = viewerRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
-            const r = iframe?.getBoundingClientRect();
-            const x = (r?.left || 0) + e.clientX;
-            const y = (r?.top || 0) + e.clientY;
-            setVocab({ word: hit.word, context: hit.context, x, y });
+            const iframeRect = iframe?.getBoundingClientRect();
+            const rect = (g.querySelector("rect") || g).getBoundingClientRect();
+            const x = (iframeRect?.left || 0) + rect.left + rect.width / 2;
+            const y = (iframeRect?.top || 0) + rect.top;
+            setMenuTarget({ id: h.id, x, y });
           });
         });
 
@@ -272,6 +292,7 @@ export default function EpubReader({ article }: Props) {
 
   // Re-apply annotations whenever highlights change.
   useEffect(() => {
+    highlightsRef.current = highlights;
     const rendition = renditionRef.current;
     if (!rendition) return;
     const seen = annotatedRef.current;
@@ -308,6 +329,17 @@ export default function EpubReader({ article }: Props) {
           { fill: "#fde047", "fill-opacity": "0.4", "mix-blend-mode": "multiply", "pointer-events": "fill", cursor: "pointer" }
         );
         seen.add(h.id);
+        // Tag the rendered <g> element so our iframe click router can map
+        // a click back to this highlight id. Run on next frames to wait for
+        // epubjs to actually attach the SVG.
+        const tag = () => {
+          const iframe = viewerRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
+          const doc = iframe?.contentDocument;
+          if (!doc) return;
+          const groups = doc.querySelectorAll("g.epub-hl:not([data-hl-id])");
+          groups.forEach((g) => g.setAttribute("data-hl-id", h.id));
+        };
+        requestAnimationFrame(() => requestAnimationFrame(tag));
       } catch (err) {
         console.warn("Failed to add annotation:", err);
       }

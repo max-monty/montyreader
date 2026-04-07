@@ -67,17 +67,15 @@ export default function RightSidebar({
 
   return (
     <>
-      {/* Toggle button */}
+      {/* Toggle button — icon-only, sits inside the header band */}
       <button
         onClick={() => onToggle(!open)}
-        className={`fixed z-50 p-2 rounded-lg transition-all duration-300
-                    font-sans text-xs font-medium flex items-center gap-1.5
-                    ${open
-                      ? "top-[52px] right-[408px] bg-white text-stone-500 hover:text-stone-700 border border-stone-200 shadow-sm"
-                      : "top-[52px] right-3 bg-stone-900 text-white hover:bg-stone-800 shadow-lg"
-                    }`}
+        title={open ? "Hide sidebar" : "Show sidebar"}
+        className={`fixed top-3 z-50 p-1.5 rounded-md transition-all duration-300
+                    text-stone-400 hover:text-stone-700
+                    ${open ? "right-[412px]" : "right-3"}`}
       >
-        {open ? <PanelRightClose size={16} /> : <><PanelRightOpen size={16} /> Sidebar</>}
+        {open ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
       </button>
 
       {/* Sidebar panel */}
