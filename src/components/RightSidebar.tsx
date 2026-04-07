@@ -73,7 +73,7 @@ export default function RightSidebar({
         title={open ? "Hide sidebar" : "Show sidebar"}
         className={`fixed top-3 z-50 p-1.5 rounded-md transition-all duration-300
                     text-stone-400 hover:text-stone-700
-                    ${open ? "right-[412px]" : "right-3"}`}
+                    ${open ? "right-[368px]" : "right-3"}`}
       >
         {open ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
       </button>
