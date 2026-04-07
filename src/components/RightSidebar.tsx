@@ -67,16 +67,17 @@ export default function RightSidebar({
 
   return (
     <>
-      {/* Toggle button — icon-only, sits inside the header band */}
-      <button
-        onClick={() => onToggle(!open)}
-        title={open ? "Hide sidebar" : "Show sidebar"}
-        className={`fixed top-3 z-50 p-1.5 rounded-md transition-all duration-300
-                    text-stone-400 hover:text-stone-700
-                    ${open ? "right-[368px]" : "right-3"}`}
-      >
-        {open ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-      </button>
+      {/* Open button — only shown when sidebar is closed. Close button lives
+          inside the panel's tab bar to avoid overlap. */}
+      {!open && (
+        <button
+          onClick={() => onToggle(true)}
+          title="Show sidebar"
+          className="fixed top-3 right-3 z-50 p-1.5 rounded-md text-stone-400 hover:text-stone-700"
+        >
+          <PanelRightOpen size={16} />
+        </button>
+      )}
 
       {/* Sidebar panel */}
       <div
@@ -89,6 +90,13 @@ export default function RightSidebar({
           <TabButton id="chat" active={tab} onClick={setTab} icon={<MessageSquare size={14} />} label="Chat" />
           <TabButton id="highlights" active={tab} onClick={setTab} icon={<Highlighter size={14} />} label={`Highlights${highlights.length ? ` (${highlights.length})` : ""}`} />
           <TabButton id="notes" active={tab} onClick={setTab} icon={<StickyNote size={14} />} label={`Notes${notes.length ? ` (${notes.length})` : ""}`} />
+          <button
+            onClick={() => onToggle(false)}
+            title="Hide sidebar"
+            className="ml-auto mr-1 p-1.5 rounded-md text-stone-400 hover:text-stone-700"
+          >
+            <PanelRightClose size={16} />
+          </button>
         </div>
 
         {tab === "chat" && <ChatTab article={article} sections={sections} currentSectionId={currentSectionId} />}
