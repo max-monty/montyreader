@@ -14,6 +14,7 @@ interface Props {
 export default function EpubReader({ article }: Props) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<any>(null);
+  const bookRef = useRef<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [toc, setToc] = useState<{ href: string; label: string }[]>([]);
@@ -36,15 +37,38 @@ export default function EpubReader({ article }: Props) {
         const buf = await res.arrayBuffer();
         if (cancelled) return;
         book = ePub(buf);
+        bookRef.current = book;
         const rendition = book.renderTo(viewerRef.current!, {
           width: "100%",
           height: "100%",
           spread: "none",
           flow: "paginated",
+          allowScriptedContent: true,
         });
         renditionRef.current = rendition;
+        // Constrain media so it doesn't overflow paginated columns.
+        rendition.themes.default({
+          "img, svg, image, video": {
+            "max-width": "100% !important",
+            "max-height": "90vh !important",
+            "object-fit": "contain",
+            "page-break-inside": "avoid",
+          },
+          body: { "margin": "0 !important" },
+          p: { "orphans": "2", "widows": "2" },
+        });
         const startCfi = typeof article.position === "string" ? article.position : undefined;
         await rendition.display(startCfi);
+        // Force an explicit resize so paginated layout doesn't overflow.
+        const resize = () => {
+          const el = viewerRef.current;
+          if (!el) return;
+          try { rendition.resize(el.clientWidth, el.clientHeight); } catch {}
+        };
+        resize();
+        const ro = new ResizeObserver(resize);
+        if (viewerRef.current) ro.observe(viewerRef.current);
+        (rendition as any).__ro = ro;
         const navigation = await book.loaded.navigation;
         if (!cancelled) {
           setToc(navigation.toc.map((item: any) => ({ href: item.href, label: item.label.trim() })));
@@ -68,6 +92,7 @@ export default function EpubReader({ article }: Props) {
     })();
     return () => {
       cancelled = true;
+      try { (renditionRef.current as any)?.__ro?.disconnect?.(); } catch {}
       try { renditionRef.current?.destroy?.(); } catch {}
       try { book?.destroy?.(); } catch {}
     };
@@ -86,7 +111,33 @@ export default function EpubReader({ article }: Props) {
   }, []);
 
   function jumpTo(href: string) {
-    renditionRef.current?.display(href);
+    const rendition = renditionRef.current;
+    const book = bookRef.current;
+    if (!rendition) return;
+    const [path, hash] = href.split("#");
+    const candidates: string[] = [];
+    try {
+      // 1) Direct spine lookup
+      const direct = book?.spine?.get?.(path);
+      if (direct?.href) candidates.push(hash ? `${direct.href}#${hash}` : direct.href);
+      // 2) Suffix match across spine items (handles OPF subdirectory mismatches)
+      const items: any[] = book?.spine?.spineItems || [];
+      const match = items.find(
+        (it) => it?.href && (it.href === path || it.href.endsWith("/" + path) || path.endsWith("/" + it.href))
+      );
+      if (match?.href) candidates.push(hash ? `${match.href}#${hash}` : match.href);
+    } catch {}
+    // 3) Original href as last resort
+    candidates.push(href);
+
+    const tryNext = (i: number): any => {
+      if (i >= candidates.length) {
+        console.warn("TOC jump failed for all candidates:", { href, candidates });
+        return;
+      }
+      return rendition.display(candidates[i]).catch(() => tryNext(i + 1));
+    };
+    tryNext(0);
     setShowToc(false);
   }
 
@@ -110,11 +161,11 @@ export default function EpubReader({ article }: Props) {
       <main className="flex-1 relative overflow-hidden">
         {loading && <div className="absolute inset-0 flex items-center justify-center text-stone-400 font-sans text-sm">Loading EPUB...</div>}
         {error && <div className="absolute inset-0 flex items-center justify-center text-red-600 font-sans text-sm">{error}</div>}
-        <button onClick={prev} className="absolute left-0 top-0 bottom-0 w-12 z-10 flex items-center justify-center text-stone-300 hover:text-stone-700 hover:bg-stone-100/50">
-          <ChevronLeft size={24} />
+        <button onClick={prev} aria-label="Previous page" className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white border border-stone-200 shadow-sm flex items-center justify-center text-stone-500 hover:text-stone-900 hover:bg-stone-50">
+          <ChevronLeft size={20} />
         </button>
-        <button onClick={next} className="absolute right-0 top-0 bottom-0 w-12 z-10 flex items-center justify-center text-stone-300 hover:text-stone-700 hover:bg-stone-100/50">
-          <ChevronRight size={24} />
+        <button onClick={next} aria-label="Next page" className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white border border-stone-200 shadow-sm flex items-center justify-center text-stone-500 hover:text-stone-900 hover:bg-stone-50">
+          <ChevronRight size={20} />
         </button>
         <div className="max-w-3xl mx-auto h-full px-16">
           <div ref={viewerRef} className="h-full" />

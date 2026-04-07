@@ -195,29 +195,23 @@ app.post("/api/clip", async (req, res) => {
   }
 });
 
-// Sign a Cloud Storage path → return a short-lived public URL.
+// Sign a Cloud Storage path → proxy to the deployed Cloud Function, which has
+// service-account credentials available for signing. Avoids requiring a local
+// service-account JSON during development.
+const SIGN_PROXY_URL =
+  process.env.SIGN_PROXY_URL ||
+  "https://monty-reader.web.app/api/sign";
 app.post("/api/sign", async (req, res) => {
   try {
-    const { path, userId } = req.body;
-    if (!path || !userId) {
-      res.status(400).json({ error: "path and userId are required" });
-      return;
-    }
-    const expectedPrefix = `users/${userId}/`;
-    if (!path.startsWith(expectedPrefix)) {
-      res.status(403).json({ error: "Path does not belong to this user" });
-      return;
-    }
-    const bucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "monty-reader.firebasestorage.app";
-    const bucket = getStorage().bucket(bucketName);
-    const file = bucket.file(path);
-    const [url] = await file.getSignedUrl({
-      action: "read",
-      expires: Date.now() + 60 * 60 * 1000,
+    const upstream = await fetch(SIGN_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
     });
-    res.json({ url });
+    const text = await upstream.text();
+    res.status(upstream.status).type("application/json").send(text);
   } catch (error: any) {
-    console.error("Sign error:", error);
+    console.error("Sign proxy error:", error);
     res.status(500).json({ error: error.message || "Failed to sign URL" });
   }
 });
