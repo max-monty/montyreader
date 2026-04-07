@@ -461,9 +461,9 @@ export default function EpubReader({ article }: Props) {
         <>
           <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setShowToc(false)} />
           <div className="fixed top-0 right-0 bottom-0 w-80 bg-white border-l border-stone-200 z-50 flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-stone-200">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-200">
+              <button onClick={() => setShowToc(false)} className="p-1 text-stone-400 hover:text-stone-700" title="Hide contents"><X size={14} /></button>
               <span className="font-sans text-sm font-medium">Contents</span>
-              <button onClick={() => setShowToc(false)} className="p-1 text-stone-400 hover:text-stone-700"><X size={14} /></button>
             </div>
             <div className="flex-1 overflow-y-auto py-2">
               {toc.map((item) => (
