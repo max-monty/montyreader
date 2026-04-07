@@ -14,6 +14,8 @@ import {
   BookMarked,
   Upload,
   Download,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   listArticles,
@@ -41,6 +43,7 @@ export default function Library() {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState("");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showPasteForm, setShowPasteForm] = useState(false);
   const [pasteUrl, setPasteUrl] = useState("");
   const [pasteText, setPasteText] = useState("");
@@ -202,6 +205,18 @@ export default function Library() {
     e.stopPropagation();
     await deleteArticle(id);
     loadAll();
+  }
+
+  async function handleCopyUrl(e: React.MouseEvent, article: Article) {
+    e.stopPropagation();
+    if (!article.url || !article.url.startsWith("http")) return;
+    try {
+      await navigator.clipboard.writeText(article.url);
+      setCopiedId(article.id);
+      setTimeout(() => setCopiedId((c) => (c === article.id ? null : c)), 1500);
+    } catch (err) {
+      console.warn("Copy failed", err);
+    }
   }
 
   async function handleExport(e: React.MouseEvent, article: Article) {
@@ -428,16 +443,25 @@ export default function Library() {
                       <Download size={15} />
                     </button>
                     {article.kind !== "pdf" && article.kind !== "epub" && article.url?.startsWith("http") && (
-                      <a
-                        href={article.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="p-1.5 text-stone-400 hover:text-stone-600 rounded"
-                        title="Open original"
-                      >
-                        <ExternalLink size={15} />
-                      </a>
+                      <>
+                        <button
+                          onClick={(e) => handleCopyUrl(e, article)}
+                          className="p-1.5 text-stone-400 hover:text-stone-700 rounded"
+                          title={copiedId === article.id ? "Copied!" : "Copy URL"}
+                        >
+                          {copiedId === article.id ? <Check size={15} className="text-green-600" /> : <Copy size={15} />}
+                        </button>
+                        <a
+                          href={article.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1.5 text-stone-400 hover:text-stone-600 rounded"
+                          title="Open original"
+                        >
+                          <ExternalLink size={15} />
+                        </a>
+                      </>
                     )}
                     <button
                       onClick={(e) => handleDelete(e, article.id)}

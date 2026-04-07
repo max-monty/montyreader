@@ -124,11 +124,9 @@ export function articleToMarkdown(bundle: ExportBundle): string {
   if (article.url) parts.push(`[Original article](${article.url})`, "");
 
   parts.push("");
-  parts.push(htmlToMarkdown(article.content || ""));
-  parts.push("");
 
   if (highlights.length) {
-    parts.push("---", "", "## Highlights", "");
+    parts.push("## Highlights", "");
     for (const h of highlights) {
       parts.push(`> ${h.text.replace(/\n/g, "\n> ")}`);
       const note = notes.find((n) => n.highlightId === h.id);
@@ -141,7 +139,7 @@ export function articleToMarkdown(bundle: ExportBundle): string {
   // Independent notes (not tied to any highlight)
   const orphanNotes = notes.filter((n) => !n.highlightId);
   if (orphanNotes.length) {
-    parts.push("---", "", "## Notes", "");
+    parts.push("## Notes", "");
     for (const n of orphanNotes) {
       parts.push(n.body, "");
     }

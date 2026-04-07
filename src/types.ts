@@ -37,6 +37,9 @@ export interface Highlight {
   createdAt: number;
   // Optional inline note tied to this highlight (legacy free-text)
   note?: string | null;
+  // EPUB Canonical Fragment Identifier — present only for highlights inside
+  // an EPUB. Used to re-render the highlight and to jump to it.
+  cfi?: string | null;
 }
 
 export type HighlightColor = "yellow" | "green" | "blue" | "pink";

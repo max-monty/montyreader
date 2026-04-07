@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, List, X } from "lucide-react";
 // @ts-ignore — epubjs has no types in many setups
 import ePub from "epubjs";
 import { getDocumentUrl } from "../utils/storage";
-import { updateArticlePosition } from "../db";
-import type { Article } from "../types";
+import {
+  updateArticlePosition,
+  addHighlight,
+  listHighlights,
+  deleteHighlight as dbDeleteHighlight,
+  listNotes,
+} from "../db";
+import type { Article, Highlight, Note } from "../types";
+import RightSidebar from "./RightSidebar";
 
 interface Props {
   article: Article;
@@ -15,11 +22,41 @@ export default function EpubReader({ article }: Props) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<any>(null);
   const bookRef = useRef<any>(null);
+  const annotatedRef = useRef<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [toc, setToc] = useState<{ href: string; label: string }[]>([]);
   const [showToc, setShowToc] = useState(false);
   const [progress, setProgress] = useState<string>("");
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bookText, setBookText] = useState<string>("");
+
+  const reloadHighlights = useCallback(async () => {
+    if (!article.id) return;
+    try {
+      const hs = await listHighlights(article.id);
+      setHighlights(hs);
+    } catch (err) {
+      console.error("Failed to load highlights:", err);
+    }
+  }, [article.id]);
+
+  const reloadNotes = useCallback(async () => {
+    if (!article.id) return;
+    try {
+      const ns = await listNotes(article.id);
+      setNotes(ns);
+    } catch (err) {
+      console.error("Failed to load notes:", err);
+    }
+  }, [article.id]);
+
+  useEffect(() => {
+    reloadHighlights();
+    reloadNotes();
+  }, [reloadHighlights, reloadNotes]);
 
   useEffect(() => {
     if (!article.storagePath) {
@@ -56,6 +93,7 @@ export default function EpubReader({ article }: Props) {
           },
           body: { "margin": "0 !important" },
           p: { "orphans": "2", "widows": "2" },
+          "::selection": { "background": "rgba(253, 224, 71, 0.6)" },
         });
         const startCfi = typeof article.position === "string" ? article.position : undefined;
         await rendition.display(startCfi);
@@ -81,6 +119,49 @@ export default function EpubReader({ article }: Props) {
           }
         });
 
+        // Capture text selections inside the EPUB iframe → save as highlight.
+        rendition.on("selected", async (cfiRange: string, contents: any) => {
+          try {
+            const range = await book.getRange(cfiRange);
+            const text = (range?.toString() || "").trim();
+            if (text.length < 2) return;
+            await addHighlight({
+              articleId: article.id,
+              text,
+              color: "yellow",
+              startOffset: 0,
+              endOffset: 0,
+              contextBefore: "",
+              contextAfter: "",
+              createdAt: Date.now(),
+              cfi: cfiRange,
+            });
+            try { contents?.window?.getSelection?.()?.removeAllRanges?.(); } catch {}
+            reloadHighlights();
+          } catch (err) {
+            console.warn("Failed to save highlight:", err);
+          }
+        });
+
+        // Lazily extract full book text for the chat tab. Don't block UI.
+        (async () => {
+          try {
+            const items: any[] = book.spine?.spineItems || [];
+            const chunks: string[] = [];
+            for (const item of items) {
+              try {
+                const doc = await item.load(book.load.bind(book));
+                const t = doc?.body?.textContent || "";
+                if (t.trim()) chunks.push(t.trim());
+                item.unload();
+              } catch {}
+            }
+            if (!cancelled) setBookText(chunks.join("\n\n"));
+          } catch (err) {
+            console.warn("Failed to extract book text:", err);
+          }
+        })();
+
         if (!cancelled) setLoading(false);
       } catch (e: any) {
         console.error(e);
@@ -95,8 +176,45 @@ export default function EpubReader({ article }: Props) {
       try { (renditionRef.current as any)?.__ro?.disconnect?.(); } catch {}
       try { renditionRef.current?.destroy?.(); } catch {}
       try { book?.destroy?.(); } catch {}
+      annotatedRef.current.clear();
     };
-  }, [article.storagePath, article.id]);
+  }, [article.storagePath, article.id, reloadHighlights]);
+
+  // Re-apply annotations whenever highlights change.
+  useEffect(() => {
+    const rendition = renditionRef.current;
+    if (!rendition) return;
+    const seen = annotatedRef.current;
+    // Add any new ones
+    for (const h of highlights) {
+      if (!h.cfi || seen.has(h.id)) continue;
+      try {
+        rendition.annotations.add(
+          "highlight",
+          h.cfi,
+          { id: h.id },
+          undefined,
+          "epub-hl",
+          { fill: "#fde047", "fill-opacity": "0.4", "mix-blend-mode": "multiply" }
+        );
+        seen.add(h.id);
+      } catch (err) {
+        console.warn("Failed to add annotation:", err);
+      }
+    }
+    // Remove ones that no longer exist
+    const liveIds = new Set(highlights.map((h) => h.id));
+    for (const id of Array.from(seen)) {
+      if (!liveIds.has(id)) {
+        const removed = highlights.find((h) => h.id === id);
+        const cfi = removed?.cfi;
+        if (cfi) {
+          try { rendition.annotations.remove(cfi, "highlight"); } catch {}
+        }
+        seen.delete(id);
+      }
+    }
+  }, [highlights, loading]);
 
   function next() { renditionRef.current?.next?.(); }
   function prev() { renditionRef.current?.prev?.(); }
@@ -117,17 +235,14 @@ export default function EpubReader({ article }: Props) {
     const [path, hash] = href.split("#");
     const candidates: string[] = [];
     try {
-      // 1) Direct spine lookup
       const direct = book?.spine?.get?.(path);
       if (direct?.href) candidates.push(hash ? `${direct.href}#${hash}` : direct.href);
-      // 2) Suffix match across spine items (handles OPF subdirectory mismatches)
       const items: any[] = book?.spine?.spineItems || [];
       const match = items.find(
         (it) => it?.href && (it.href === path || it.href.endsWith("/" + path) || path.endsWith("/" + it.href))
       );
       if (match?.href) candidates.push(hash ? `${match.href}#${hash}` : match.href);
     } catch {}
-    // 3) Original href as last resort
     candidates.push(href);
 
     const tryNext = (i: number): any => {
@@ -141,10 +256,35 @@ export default function EpubReader({ article }: Props) {
     setShowToc(false);
   }
 
+  function jumpToHighlight(h: Highlight) {
+    if (!h.cfi) return;
+    renditionRef.current?.display(h.cfi).catch((err: any) => {
+      console.warn("Failed to jump to highlight:", err);
+    });
+  }
+
+  async function handleDeleteHighlight(id: string) {
+    const target = highlights.find((h) => h.id === id);
+    await dbDeleteHighlight(id);
+    if (target?.cfi) {
+      try { renditionRef.current?.annotations.remove(target.cfi, "highlight"); } catch {}
+      annotatedRef.current.delete(id);
+    }
+    reloadHighlights();
+    reloadNotes();
+  }
+
+  // Article object passed to the sidebar — populate textContent so the chat
+  // tab has the book text to send to Claude.
+  const articleForSidebar: Article = {
+    ...article,
+    textContent: bookText || article.textContent || "",
+  };
+
   return (
     <div className="h-screen flex flex-col bg-stone-50">
       <header className="bg-white/95 backdrop-blur border-b border-stone-200 shrink-0">
-        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+        <div className={`max-w-5xl mx-auto px-6 py-3 flex items-center justify-between transition-all duration-300 ${sidebarOpen ? "mr-[400px]" : ""}`}>
           <Link to="/" className="flex items-center gap-2 text-stone-500 hover:text-stone-700 font-sans text-sm">
             <ArrowLeft size={16} /> Library
           </Link>
@@ -158,7 +298,7 @@ export default function EpubReader({ article }: Props) {
         </div>
       </header>
 
-      <main className="flex-1 relative overflow-hidden">
+      <main className={`flex-1 relative overflow-hidden transition-all duration-300 ${sidebarOpen ? "mr-[400px]" : ""}`}>
         {loading && <div className="absolute inset-0 flex items-center justify-center text-stone-400 font-sans text-sm">Loading EPUB...</div>}
         {error && <div className="absolute inset-0 flex items-center justify-center text-red-600 font-sans text-sm">{error}</div>}
         <button onClick={prev} aria-label="Previous page" className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white border border-stone-200 shadow-sm flex items-center justify-center text-stone-500 hover:text-stone-900 hover:bg-stone-50">
@@ -194,6 +334,17 @@ export default function EpubReader({ article }: Props) {
           </div>
         </>
       )}
+
+      <RightSidebar
+        article={articleForSidebar}
+        open={sidebarOpen}
+        onToggle={setSidebarOpen}
+        highlights={highlights}
+        notes={notes}
+        onJumpToHighlight={jumpToHighlight}
+        onDeleteHighlight={handleDeleteHighlight}
+        onNotesChanged={reloadNotes}
+      />
     </div>
   );
 }
