@@ -13,7 +13,7 @@ import {
   addNote,
 } from "../db";
 import type { Article, Highlight, Note } from "../types";
-import RightSidebar from "./RightSidebar";
+import RightSidebar, { type BookSection } from "./RightSidebar";
 
 interface Props {
   article: Article;
@@ -32,7 +32,8 @@ export default function EpubReader({ article }: Props) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [bookText, setBookText] = useState<string>("");
+  const [sections, setSections] = useState<BookSection[]>([]);
+  const [currentSectionId, setCurrentSectionId] = useState<string | null>(null);
   const [menuTarget, setMenuTarget] = useState<{ id: string; x: number; y: number } | null>(null);
   const [noteComposer, setNoteComposer] = useState<{ highlightId: string; x: number; y: number } | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -121,6 +122,8 @@ export default function EpubReader({ article }: Props) {
             updateArticlePosition(article.id, location.start.cfi);
             setProgress(`${Math.round((location.start.percentage || 0) * 100)}%`);
           }
+          const href = location?.start?.href;
+          if (href) setCurrentSectionId(href);
         });
 
         // Capture text selections inside the EPUB iframe → save as highlight.
@@ -147,22 +150,53 @@ export default function EpubReader({ article }: Props) {
           }
         });
 
-        // Lazily extract full book text for the chat tab. Don't block UI.
+        // Lazily extract per-section text so the chat tab can let the user
+        // pick which sections to send as context. Don't block UI.
         (async () => {
           try {
             const items: any[] = book.spine?.spineItems || [];
-            const chunks: string[] = [];
+            // Build a label index from the TOC (href → label).
+            const tocLabels = new Map<string, string>();
+            try {
+              const nav = await book.loaded.navigation;
+              const walk = (nodes: any[]) => {
+                for (const n of nodes || []) {
+                  if (n?.href) {
+                    const path = String(n.href).split("#")[0];
+                    if (!tocLabels.has(path)) tocLabels.set(path, (n.label || "").trim());
+                  }
+                  if (n?.subitems) walk(n.subitems);
+                }
+              };
+              walk(nav?.toc || []);
+            } catch {}
+
+            const collected: BookSection[] = [];
+            let i = 0;
             for (const item of items) {
+              i++;
               try {
                 const doc = await item.load(book.load.bind(book));
-                const t = doc?.body?.textContent || "";
-                if (t.trim()) chunks.push(t.trim());
+                const text = (doc?.body?.textContent || "").trim();
                 item.unload();
+                if (!text) continue;
+                const href = String(item.href || "");
+                const path = href.split("#")[0];
+                let label = "";
+                // Direct match, then suffix-match (TOC hrefs may include subdirs).
+                label = tocLabels.get(path) || "";
+                if (!label) {
+                  for (const [k, v] of tocLabels.entries()) {
+                    if (k.endsWith("/" + path) || path.endsWith("/" + k)) { label = v; break; }
+                  }
+                }
+                if (!label) label = `Section ${i}`;
+                collected.push({ id: href, label, text });
               } catch {}
             }
-            if (!cancelled) setBookText(chunks.join("\n\n"));
+            if (!cancelled) setSections(collected);
           } catch (err) {
-            console.warn("Failed to extract book text:", err);
+            console.warn("Failed to extract book sections:", err);
           }
         })();
 
@@ -304,12 +338,9 @@ export default function EpubReader({ article }: Props) {
     reloadNotes();
   }
 
-  // Article object passed to the sidebar — populate textContent so the chat
-  // tab has the book text to send to Claude.
-  const articleForSidebar: Article = {
-    ...article,
-    textContent: bookText || article.textContent || "",
-  };
+  // Article object passed to the sidebar. textContent is left empty for
+  // EPUBs — the chat tab uses the per-section picker instead.
+  const articleForSidebar: Article = { ...article, textContent: "" };
 
   return (
     <div className="h-screen flex flex-col bg-stone-50">
@@ -456,6 +487,8 @@ export default function EpubReader({ article }: Props) {
         onJumpToHighlight={jumpToHighlight}
         onDeleteHighlight={handleDeleteHighlight}
         onNotesChanged={reloadNotes}
+        sections={sections}
+        currentSectionId={currentSectionId}
       />
     </div>
   );

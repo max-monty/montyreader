@@ -15,6 +15,7 @@ import {
   Check,
   X,
   CornerDownLeft,
+  BookOpen,
 } from "lucide-react";
 import {
   getConversation,
@@ -30,6 +31,12 @@ import { MODELS } from "../types";
 
 type TabId = "chat" | "highlights" | "notes";
 
+export interface BookSection {
+  id: string;
+  label: string;
+  text: string;
+}
+
 interface Props {
   article: Article;
   open: boolean;
@@ -39,6 +46,9 @@ interface Props {
   onJumpToHighlight: (h: Highlight) => void;
   onDeleteHighlight: (id: string) => void;
   onNotesChanged: () => void;
+  // EPUB-only: per-section book text + the section currently visible.
+  sections?: BookSection[];
+  currentSectionId?: string | null;
 }
 
 export default function RightSidebar({
@@ -50,6 +60,8 @@ export default function RightSidebar({
   onJumpToHighlight,
   onDeleteHighlight,
   onNotesChanged,
+  sections,
+  currentSectionId,
 }: Props) {
   const [tab, setTab] = useState<TabId>("chat");
 
@@ -81,7 +93,7 @@ export default function RightSidebar({
           <TabButton id="notes" active={tab} onClick={setTab} icon={<StickyNote size={14} />} label={`Notes${notes.length ? ` (${notes.length})` : ""}`} />
         </div>
 
-        {tab === "chat" && <ChatTab article={article} />}
+        {tab === "chat" && <ChatTab article={article} sections={sections} currentSectionId={currentSectionId} />}
         {tab === "highlights" && (
           <HighlightsTab
             highlights={highlights}
@@ -125,7 +137,62 @@ function TabButton({
 
 /* ---------- CHAT TAB ---------- */
 
-function ChatTab({ article }: { article: Article }) {
+function ChatTab({
+  article,
+  sections,
+  currentSectionId,
+}: {
+  article: Article;
+  sections?: BookSection[];
+  currentSectionId?: string | null;
+}) {
+  const isBook = !!sections && sections.length > 0;
+  const [selectedSectionIds, setSelectedSectionIds] = useState<Set<string>>(new Set());
+  const [userTouchedSections, setUserTouchedSections] = useState(false);
+  const [showSectionPicker, setShowSectionPicker] = useState(false);
+
+  // Default selection follows the current section unless the user manually
+  // edited the picker.
+  useEffect(() => {
+    if (!isBook || userTouchedSections) return;
+    if (currentSectionId) {
+      setSelectedSectionIds(new Set([currentSectionId]));
+    }
+  }, [isBook, currentSectionId, userTouchedSections]);
+
+  function toggleSection(id: string) {
+    setUserTouchedSections(true);
+    setSelectedSectionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllSections() {
+    setUserTouchedSections(true);
+    setSelectedSectionIds(new Set((sections || []).map((s) => s.id)));
+  }
+  function clearSections() {
+    setUserTouchedSections(true);
+    setSelectedSectionIds(new Set());
+  }
+  function resetToCurrent() {
+    setUserTouchedSections(false);
+    if (currentSectionId) setSelectedSectionIds(new Set([currentSectionId]));
+    else setSelectedSectionIds(new Set());
+  }
+
+  function buildContextText(): string {
+    if (!isBook) return article.textContent || "";
+    if (!sections || selectedSectionIds.size === 0) return "";
+    const ordered = sections.filter((s) => selectedSectionIds.has(s.id));
+    return ordered
+      .map((s) => `## ${s.label}\n\n${s.text}`)
+      .join("\n\n---\n\n");
+  }
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -214,7 +281,7 @@ function ChatTab({ article }: { article: Article }) {
         body: JSON.stringify({
           messages: newMessages,
           model,
-          articleContent: article.textContent,
+          articleContent: buildContextText(),
           articleTitle: article.title,
         }),
         signal: controller.signal,
@@ -371,6 +438,47 @@ function ChatTab({ article }: { article: Article }) {
         </div>
       </div>
 
+      {isBook && (
+        <div className="px-4 py-2 border-b border-stone-100 shrink-0">
+          <button
+            onClick={() => setShowSectionPicker((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 text-xs font-sans text-stone-600 hover:text-stone-900 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-lg px-3 py-1.5"
+            title="Choose which book sections to send as context"
+          >
+            <span className="flex items-center gap-1.5">
+              <BookOpen size={12} />
+              Context: {selectedSectionIds.size === 0 ? "none" : `${selectedSectionIds.size} section${selectedSectionIds.size === 1 ? "" : "s"}`}
+            </span>
+            <ChevronDown size={12} className={`transition-transform ${showSectionPicker ? "rotate-180" : ""}`} />
+          </button>
+          {showSectionPicker && (
+            <div className="mt-2 border border-stone-200 rounded-lg bg-white max-h-72 overflow-y-auto">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-stone-100 sticky top-0 bg-white">
+                <button onClick={resetToCurrent} className="text-[11px] font-sans text-stone-500 hover:text-stone-900">Current only</button>
+                <div className="flex items-center gap-2">
+                  <button onClick={selectAllSections} className="text-[11px] font-sans text-stone-500 hover:text-stone-900">All</button>
+                  <button onClick={clearSections} className="text-[11px] font-sans text-stone-500 hover:text-stone-900">None</button>
+                </div>
+              </div>
+              {(sections || []).map((s) => {
+                const isCurrent = s.id === currentSectionId;
+                const checked = selectedSectionIds.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-sans cursor-pointer hover:bg-stone-50 ${isCurrent ? "bg-stone-50" : ""}`}
+                  >
+                    <input type="checkbox" checked={checked} onChange={() => toggleSection(s.id)} className="accent-stone-900" />
+                    <span className="flex-1 truncate text-stone-700">{s.label}</span>
+                    {isCurrent && <span className="text-[10px] text-stone-400 shrink-0">current</span>}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {showHistory && (
         <div className="border-b border-stone-200 bg-stone-50 max-h-64 overflow-y-auto">
           {conversations.length === 0 ? (
@@ -407,7 +515,7 @@ function ChatTab({ article }: { article: Article }) {
         {messages.length === 0 && (
           <div className="text-center py-12 text-stone-400 font-sans text-sm">
             <MessageSquare size={32} className="mx-auto mb-3 opacity-40" />
-            <p>Ask anything about this article</p>
+            <p>{isBook ? "Ask anything about the selected sections" : "Ask anything about this article"}</p>
           </div>
         )}
         {messages.map((msg, i) => (
