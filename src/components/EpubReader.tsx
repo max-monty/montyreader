@@ -194,11 +194,23 @@ export default function EpubReader({ article }: Props) {
       if (!h.cfi || seen.has(h.id)) continue;
       try {
         const cb = (e: any) => {
-          // Translate iframe-local coords to outer viewport coords.
+          // Position the menu centered above the actual highlight rect, in
+          // outer-viewport coordinates. The annotation SVG lives inside the
+          // EPUB iframe, so we add the iframe's offset to the rect's local
+          // position.
           const iframe = viewerRef.current?.querySelector("iframe") as HTMLIFrameElement | null;
-          const r = iframe?.getBoundingClientRect();
-          const x = (r?.left || 0) + (e?.clientX || 0);
-          const y = (r?.top || 0) + (e?.clientY || 0);
+          const iframeRect = iframe?.getBoundingClientRect();
+          const target = e?.target as Element | undefined;
+          let x = 0;
+          let y = 0;
+          if (target?.getBoundingClientRect && iframeRect) {
+            const r = target.getBoundingClientRect();
+            x = iframeRect.left + r.left + r.width / 2;
+            y = iframeRect.top + r.top;
+          } else if (iframeRect) {
+            x = iframeRect.left + (e?.clientX || 0);
+            y = iframeRect.top + (e?.clientY || 0);
+          }
           setMenuTarget({ id: h.id, x, y });
         };
         rendition.annotations.add(
