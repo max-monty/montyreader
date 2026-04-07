@@ -12,7 +12,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { firestore, getCurrentUserId } from "./firebase";
-import type { Article, Highlight, Conversation, Note, VocabEntry } from "./types";
+import type { Article, Highlight, Conversation, Note, VocabEntry, Folder } from "./types";
 import { deleteDocument } from "./utils/storage";
 
 function getDb() {
@@ -47,9 +47,42 @@ export async function getArticle(id: string): Promise<Article | null> {
 
 export async function updateArticlePosition(id: string, position: string | number): Promise<void> {
   try {
-    await updateDoc(doc(getDb(), "articles", id), { position });
+    await updateDoc(doc(getDb(), "articles", id), { position, lastReadAt: Date.now() });
   } catch (err) {
     console.warn("Failed to save position", err);
+  }
+}
+
+export async function setArticleFolders(id: string, folderIds: string[]): Promise<void> {
+  await updateDoc(doc(getDb(), "articles", id), { folderIds });
+}
+
+// Folders
+export async function listFolders(): Promise<Folder[]> {
+  const q = query(col("folders"), where("userId", "==", uid()));
+  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Folder);
+  return items.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createFolder(name: string): Promise<string> {
+  const ref = await addDoc(col("folders"), { name: name.trim(), userId: uid(), createdAt: Date.now() });
+  return ref.id;
+}
+
+export async function renameFolder(id: string, name: string): Promise<void> {
+  await updateDoc(doc(getDb(), "folders", id), { name: name.trim() });
+}
+
+export async function deleteFolder(id: string): Promise<void> {
+  await deleteDoc(doc(getDb(), "folders", id));
+}
+
+export async function touchArticle(id: string): Promise<void> {
+  try {
+    await updateDoc(doc(getDb(), "articles", id), { lastReadAt: Date.now() });
+  } catch (err) {
+    console.warn("Failed to touch article", err);
   }
 }
 

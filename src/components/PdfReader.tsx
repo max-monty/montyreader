@@ -5,7 +5,7 @@ import * as pdfjs from "pdfjs-dist";
 // @ts-ignore — Vite worker import
 import PdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 import { getDocumentUrl } from "../utils/storage";
-import { updateArticlePosition } from "../db";
+import { updateArticlePosition, touchArticle } from "../db";
 import type { Article } from "../types";
 
 // Configure worker once
@@ -25,6 +25,7 @@ export default function PdfReader({ article }: Props) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    touchArticle(article.id);
     if (!article.storagePath) {
       setError("This document has no file attached.");
       setLoading(false);

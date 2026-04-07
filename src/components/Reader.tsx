@@ -9,6 +9,7 @@ import {
   listNotes,
   addNote,
   updateArticlePosition,
+  touchArticle,
 } from "../db";
 import type { Article, Highlight, Note } from "../types";
 import RightSidebar from "./RightSidebar";
@@ -97,6 +98,7 @@ export default function Reader() {
 
   useEffect(() => {
     if (!id) return;
+    touchArticle(id);
     getArticle(id).then((a) => {
       if (a) setArticle(a);
       else navigate("/");

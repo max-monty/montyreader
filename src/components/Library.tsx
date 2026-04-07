@@ -17,6 +17,8 @@ import {
   Copy,
   Check,
   Languages,
+  Folder as FolderIcon,
+  FolderPlus,
 } from "lucide-react";
 import {
   listArticles,
@@ -29,9 +31,17 @@ import {
   listNotes,
   listAllVocab,
   deleteVocab,
+  listFolders,
+  createFolder,
+  deleteFolder,
+  renameFolder,
+  setArticleFolders,
 } from "../db";
 import { signOut, getCurrentUser } from "../firebase";
-import type { Article, Highlight, Note, VocabEntry } from "../types";
+import type { Article, Highlight, Note, VocabEntry, Folder } from "../types";
+
+type SortKey = "added-desc" | "added-asc" | "opened-desc" | "highlights-desc" | "notes-desc";
+type KindFilter = "all" | "web" | "pdf" | "epub";
 import { uploadDocument } from "../utils/storage";
 import { articleToMarkdown, downloadText, slugify } from "../utils/markdown";
 
@@ -42,7 +52,13 @@ export default function Library() {
   const [allHighlights, setAllHighlights] = useState<Highlight[]>([]);
   const [allNotes, setAllNotes] = useState<Note[]>([]);
   const [allVocab, setAllVocab] = useState<VocabEntry[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [tab, setTab] = useState<LibTab>("all");
+  const [sort, setSort] = useState<SortKey>("added-desc");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [folderFilter, setFolderFilter] = useState<string>("all"); // "all" | "none" | folderId
+  const [folderMenuFor, setFolderMenuFor] = useState<string | null>(null); // articleId
+  const [newFolderName, setNewFolderName] = useState("");
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -62,16 +78,18 @@ export default function Library() {
 
   async function loadAll() {
     try {
-      const [a, h, n, v] = await Promise.all([
+      const [a, h, n, v, f] = await Promise.all([
         listArticles(),
         listAllHighlights().catch(() => [] as Highlight[]),
         listAllNotes().catch(() => [] as Note[]),
         listAllVocab().catch(() => [] as VocabEntry[]),
+        listFolders().catch(() => [] as Folder[]),
       ]);
       setArticles(a);
       setAllHighlights(h);
       setAllNotes(n);
       setAllVocab(v);
+      setFolders(f);
     } catch (err) {
       console.error("Failed to load library:", err);
     } finally {
@@ -252,6 +270,50 @@ export default function Library() {
     return articles.find((a) => a.id === id);
   }
 
+  // Counts per article
+  const hlCount = (id: string) => allHighlights.filter((h) => h.articleId === id).length;
+  const noteCount = (id: string) => allNotes.filter((n) => n.articleId === id).length;
+
+  const visibleArticles = (() => {
+    let list = articles.slice();
+    if (kindFilter !== "all") list = list.filter((a) => (a.kind || "web") === kindFilter);
+    if (folderFilter === "none") list = list.filter((a) => !a.folderIds || a.folderIds.length === 0);
+    else if (folderFilter !== "all") list = list.filter((a) => a.folderIds?.includes(folderFilter));
+    switch (sort) {
+      case "added-desc":      list.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)); break;
+      case "added-asc":       list.sort((a, b) => (a.savedAt || 0) - (b.savedAt || 0)); break;
+      case "opened-desc":     list.sort((a, b) => (b.lastReadAt || 0) - (a.lastReadAt || 0)); break;
+      case "highlights-desc": list.sort((a, b) => hlCount(b.id) - hlCount(a.id)); break;
+      case "notes-desc":      list.sort((a, b) => noteCount(b.id) - noteCount(a.id)); break;
+    }
+    return list;
+  })();
+
+  async function handleCreateFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    await createFolder(name);
+    setNewFolderName("");
+    loadAll();
+  }
+
+  async function handleDeleteFolder(id: string) {
+    if (!confirm("Delete this folder? Articles will be unassigned.")) return;
+    await deleteFolder(id);
+    // Strip from any articles
+    const affected = articles.filter((a) => a.folderIds?.includes(id));
+    await Promise.all(affected.map((a) => setArticleFolders(a.id, (a.folderIds || []).filter((f) => f !== id))));
+    if (folderFilter === id) setFolderFilter("all");
+    loadAll();
+  }
+
+  async function toggleArticleFolder(article: Article, folderId: string) {
+    const current = article.folderIds || [];
+    const next = current.includes(folderId) ? current.filter((f) => f !== folderId) : [...current, folderId];
+    await setArticleFolders(article.id, next);
+    setArticles((prev) => prev.map((a) => (a.id === article.id ? { ...a, folderIds: next } : a)));
+  }
+
   function kindIcon(kind: Article["kind"]) {
     if (kind === "pdf") return <FileText size={12} className="text-stone-400" />;
     if (kind === "epub") return <BookMarked size={12} className="text-stone-400" />;
@@ -416,8 +478,70 @@ export default function Library() {
               <p className="text-sm mt-1">Paste a URL above to get started</p>
             </div>
           ) : (
-            <div className="space-y-1">
-              {articles.map((article) => (
+            <>
+              {/* Filter / sort controls */}
+              <div className="flex flex-wrap items-center gap-2 mb-3 text-xs font-sans">
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  className="px-2 py-1 bg-white border border-stone-200 rounded text-stone-700 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                >
+                  <option value="added-desc">Newest added</option>
+                  <option value="added-asc">Oldest added</option>
+                  <option value="opened-desc">Recently opened</option>
+                  <option value="highlights-desc">Most highlights</option>
+                  <option value="notes-desc">Most notes</option>
+                </select>
+                <select
+                  value={kindFilter}
+                  onChange={(e) => setKindFilter(e.target.value as KindFilter)}
+                  className="px-2 py-1 bg-white border border-stone-200 rounded text-stone-700 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                >
+                  <option value="all">All types</option>
+                  <option value="web">Articles</option>
+                  <option value="pdf">PDFs</option>
+                  <option value="epub">EPUBs</option>
+                </select>
+                <select
+                  value={folderFilter}
+                  onChange={(e) => setFolderFilter(e.target.value)}
+                  className="px-2 py-1 bg-white border border-stone-200 rounded text-stone-700 focus:outline-none focus:ring-1 focus:ring-stone-400"
+                >
+                  <option value="all">All folders</option>
+                  <option value="none">Unfiled</option>
+                  {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+                <div className="flex items-center gap-1 ml-auto">
+                  <input
+                    type="text"
+                    placeholder="New folder..."
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCreateFolder()}
+                    className="px-2 py-1 bg-white border border-stone-200 rounded text-stone-700 focus:outline-none focus:ring-1 focus:ring-stone-400 w-32"
+                  />
+                  <button
+                    onClick={handleCreateFolder}
+                    disabled={!newFolderName.trim()}
+                    className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-30"
+                    title="Create folder"
+                  >
+                    <FolderPlus size={14} />
+                  </button>
+                  {folderFilter !== "all" && folderFilter !== "none" && (
+                    <button
+                      onClick={() => handleDeleteFolder(folderFilter)}
+                      className="p-1 text-stone-400 hover:text-red-500"
+                      title="Delete current folder"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+              {visibleArticles.map((article) => (
                 <div
                   key={article.id}
                   onClick={() => navigate(`/read/${article.id}`)}
@@ -429,11 +553,18 @@ export default function Library() {
                       {kindIcon(article.kind)}
                       {article.title}
                     </h2>
-                    <div className="flex items-center gap-2 text-xs font-sans text-stone-400">
+                    <div className="flex items-center gap-2 text-xs font-sans text-stone-400 flex-wrap">
                       <span>{article.kind === "pdf" || article.kind === "epub" ? (article.kind?.toUpperCase()) : getDomain(article.url)}</span>
                       {article.byline && (<><span>-</span><span className="truncate">{article.byline}</span></>)}
                       <span>-</span>
                       <span>{formatDate(article.savedAt)}</span>
+                      {hlCount(article.id) > 0 && (<><span>-</span><span>{hlCount(article.id)} hl</span></>)}
+                      {noteCount(article.id) > 0 && (<><span>-</span><span>{noteCount(article.id)} notes</span></>)}
+                      {(article.folderIds || []).map((fid) => {
+                        const f = folders.find((x) => x.id === fid);
+                        if (!f) return null;
+                        return <span key={fid} className="px-1.5 py-0.5 bg-stone-200 text-stone-600 rounded">{f.name}</span>;
+                      })}
                     </div>
                     {article.excerpt && (
                       <p className="mt-1.5 text-sm text-stone-500 line-clamp-2 leading-relaxed">
@@ -441,7 +572,31 @@ export default function Library() {
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-1">
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-1 relative">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setFolderMenuFor(folderMenuFor === article.id ? null : article.id); }}
+                      className="p-1.5 text-stone-400 hover:text-stone-700 rounded"
+                      title="Add to folder"
+                    >
+                      <FolderIcon size={15} />
+                    </button>
+                    {folderMenuFor === article.id && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-0 top-8 z-50 bg-white border border-stone-200 rounded-lg shadow-lg p-2 w-48"
+                      >
+                        {folders.length === 0 && <div className="text-xs text-stone-400 px-2 py-1">No folders yet</div>}
+                        {folders.map((f) => {
+                          const checked = article.folderIds?.includes(f.id) || false;
+                          return (
+                            <label key={f.id} className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-stone-100 rounded cursor-pointer">
+                              <input type="checkbox" checked={checked} onChange={() => toggleArticleFolder(article, f.id)} className="accent-stone-900" />
+                              <span className="truncate">{f.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                     <button
                       onClick={(e) => handleExport(e, article)}
                       className="p-1.5 text-stone-400 hover:text-stone-700 rounded"
@@ -480,7 +635,8 @@ export default function Library() {
                   </div>
                 </div>
               ))}
-            </div>
+              </div>
+            </>
           )
         )}
 

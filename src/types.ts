@@ -22,6 +22,15 @@ export interface Article {
   //   pdf  -> 1-based page number
   //   epub -> EPUB CFI string
   position?: string | number | null;
+  lastReadAt?: number | null;
+  folderIds?: string[] | null;
+}
+
+export interface Folder {
+  id: string;
+  userId?: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface Highlight {

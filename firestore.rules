@@ -30,6 +30,13 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
+    match /folders/{docId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
     match /vocab/{docId} {
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid;

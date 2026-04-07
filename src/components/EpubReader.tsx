@@ -6,6 +6,7 @@ import ePub from "epubjs";
 import { getDocumentUrl } from "../utils/storage";
 import {
   updateArticlePosition,
+  touchArticle,
   addHighlight,
   listHighlights,
   deleteHighlight as dbDeleteHighlight,
@@ -66,6 +67,8 @@ export default function EpubReader({ article }: Props) {
     reloadHighlights();
     reloadNotes();
   }, [reloadHighlights, reloadNotes]);
+
+  useEffect(() => { touchArticle(article.id); }, [article.id]);
 
   useEffect(() => {
     if (!article.storagePath) {
