@@ -12,7 +12,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { firestore, getCurrentUserId } from "./firebase";
-import type { Article, Highlight, Conversation } from "./types";
+import type { Article, Highlight, Conversation, Note } from "./types";
 
 function getDb() {
   if (!firestore) throw new Error("Firebase not configured");
@@ -31,8 +31,9 @@ function col(name: string) {
 export async function saveArticle(article: Omit<Article, "id" | "userId">): Promise<string> {
   const ref = await addDoc(col("articles"), {
     ...article,
+    kind: article.kind ?? "web",
     userId: uid(),
-    savedAt: Date.now(),
+    savedAt: article.savedAt ?? Date.now(),
   });
   return ref.id;
 }
@@ -41,6 +42,14 @@ export async function getArticle(id: string): Promise<Article | null> {
   const snap = await getDoc(doc(getDb(), "articles", id));
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as Article;
+}
+
+export async function updateArticlePosition(id: string, position: string | number): Promise<void> {
+  try {
+    await updateDoc(doc(getDb(), "articles", id), { position });
+  } catch (err) {
+    console.warn("Failed to save position", err);
+  }
 }
 
 export async function listArticles(): Promise<Article[]> {
@@ -73,6 +82,9 @@ export async function deleteArticle(id: string): Promise<void> {
   const cq = query(col("conversations"), where("articleId", "==", id));
   const cs = await getDocs(cq);
   for (const c of cs.docs) await deleteDoc(c.ref);
+  const nq = query(col("notes"), where("articleId", "==", id));
+  const ns = await getDocs(nq);
+  for (const n of ns.docs) await deleteDoc(n.ref);
 }
 
 // Highlights
@@ -96,8 +108,68 @@ export async function listHighlights(articleId: string): Promise<Highlight[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Highlight);
 }
 
+export async function listAllHighlights(): Promise<Highlight[]> {
+  const q = query(
+    col("highlights"),
+    where("userId", "==", uid()),
+    orderBy("createdAt", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Highlight);
+}
+
 export async function deleteHighlight(id: string): Promise<void> {
   await deleteDoc(doc(getDb(), "highlights", id));
+  // Cascade-delete notes attached to this highlight
+  const nq = query(col("notes"), where("highlightId", "==", id));
+  const ns = await getDocs(nq);
+  for (const n of ns.docs) await deleteDoc(n.ref);
+}
+
+// Notes
+export async function addNote(note: Omit<Note, "id" | "userId" | "createdAt" | "updatedAt"> & { createdAt?: number; updatedAt?: number }): Promise<string> {
+  const now = Date.now();
+  const ref = await addDoc(col("notes"), {
+    ...note,
+    articleId: note.articleId ?? null,
+    highlightId: note.highlightId ?? null,
+    userId: uid(),
+    createdAt: note.createdAt ?? now,
+    updatedAt: note.updatedAt ?? now,
+  });
+  return ref.id;
+}
+
+export async function updateNote(id: string, body: string): Promise<void> {
+  await updateDoc(doc(getDb(), "notes", id), {
+    body,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  await deleteDoc(doc(getDb(), "notes", id));
+}
+
+export async function listNotes(articleId: string): Promise<Note[]> {
+  const q = query(
+    col("notes"),
+    where("userId", "==", uid()),
+    where("articleId", "==", articleId),
+    orderBy("createdAt", "asc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note);
+}
+
+export async function listAllNotes(): Promise<Note[]> {
+  const q = query(
+    col("notes"),
+    where("userId", "==", uid()),
+    orderBy("updatedAt", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Note);
 }
 
 // Conversations

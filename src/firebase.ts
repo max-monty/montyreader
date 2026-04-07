@@ -1,5 +1,6 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 import {
   getAuth,
   signInWithPopup,
@@ -25,15 +26,18 @@ export const isConfigured = !!firebaseConfig.apiKey && !!firebaseConfig.projectI
 let app: FirebaseApp | null = null;
 let _firestore: Firestore | null = null;
 let _auth: Auth | null = null;
+let _storage: FirebaseStorage | null = null;
 
 if (isConfigured) {
   app = initializeApp(firebaseConfig);
   _firestore = getFirestore(app);
   _auth = getAuth(app);
+  try { _storage = getStorage(app); } catch {}
 }
 
 export const firestore = _firestore;
 export const auth = _auth;
+export const storage = _storage;
 
 const googleProvider = new GoogleAuthProvider();
 

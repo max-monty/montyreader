@@ -101,6 +101,38 @@ app.post("/api/fetch-article", async (req, res) => {
   }
 });
 
+// Parse raw pasted text into article shape (no fetching, no DB write)
+app.post("/api/parse-text", async (req, res) => {
+  try {
+    const { url, text, title } = req.body;
+    if (!url || !text) {
+      res.status(400).json({ error: "url and text are required" });
+      return;
+    }
+    const paragraphs = String(text)
+      .split(/\n\s*\n+/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => `<p>${p.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>")}</p>`)
+      .join("\n");
+    let siteName = null;
+    try { siteName = new URL(url).hostname.replace(/^www\./, ""); } catch {}
+    const finalTitle = title || (text.split("\n").find((l) => l.trim())?.slice(0, 120) || "Untitled");
+    res.json({
+      title: finalTitle,
+      byline: null,
+      content: paragraphs,
+      textContent: text,
+      excerpt: text.slice(0, 200).replace(/\s+/g, " ").trim(),
+      siteName,
+      publishedTime: null,
+    });
+  } catch (error) {
+    console.error("Parse-text error:", error);
+    res.status(500).json({ error: error.message || "Failed to parse text" });
+  }
+});
+
 // Clip: accept raw HTML from bookmarklet, parse, save to Firestore
 app.post("/api/clip", async (req, res) => {
   try {

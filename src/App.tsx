@@ -5,6 +5,7 @@ import { isConfigured, onAuthChange, signInWithGoogle, signInAsGuest } from "./f
 import Library from "./components/Library";
 import Clip from "./components/Clip";
 import Reader from "./components/Reader";
+import Settings from "./components/Settings";
 
 function SetupScreen() {
   return (
@@ -118,6 +119,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Library />} />
         <Route path="/read/:id" element={<Reader />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/clip" element={<Clip />} />
       </Routes>
     </BrowserRouter>

@@ -1,32 +1,36 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Trash2 } from "lucide-react";
-import { getArticle, listHighlights, addHighlight, deleteHighlight as dbDeleteHighlight } from "../db";
-import type { Article, Highlight } from "../types";
-import ChatSidebar from "./ChatSidebar";
-import HighlightsPanel from "./HighlightsPanel";
+import { ArrowLeft, ExternalLink, Trash2, CornerDownLeft, StickyNote, X, Check } from "lucide-react";
+import {
+  getArticle,
+  listHighlights,
+  addHighlight,
+  deleteHighlight as dbDeleteHighlight,
+  listNotes,
+  addNote,
+  updateArticlePosition,
+} from "../db";
+import type { Article, Highlight, Note } from "../types";
+import RightSidebar from "./RightSidebar";
+import PdfReader from "./PdfReader";
+import EpubReader from "./EpubReader";
 
 // Inject highlight marks into article HTML by matching text in the text-only content
 function applyHighlightsToHtml(html: string, highlights: Highlight[]): string {
   if (!highlights.length) return html;
 
-  // Parse to a temp DOM to work with text nodes
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${html}</div>`, "text/html");
   const container = doc.body.firstElementChild!;
   const fullText = container.textContent || "";
 
-  // Sort highlights by startOffset descending so we can apply from end to start
-  // without shifting earlier offsets
   const sorted = [...highlights].sort((a, b) => b.startOffset - a.startOffset);
 
   for (const h of sorted) {
-    // Find the text in the full content
     let idx = fullText.indexOf(h.text, Math.max(0, h.startOffset - 20));
     if (idx === -1) idx = fullText.indexOf(h.text);
     if (idx === -1) continue;
 
-    // Walk text nodes to find start and end positions
     const walker = doc.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     let charCount = 0;
     const textNodes: { node: Text; start: number; end: number }[] = [];
@@ -41,7 +45,6 @@ function applyHighlightsToHtml(html: string, highlights: Highlight[]): string {
     const hlStart = idx;
     const hlEnd = idx + h.text.length;
 
-    // Find all text nodes that overlap with the highlight range
     for (const tn of textNodes) {
       if (tn.end <= hlStart || tn.start >= hlEnd) continue;
 
@@ -49,14 +52,12 @@ function applyHighlightsToHtml(html: string, highlights: Highlight[]): string {
       const nodeEnd = Math.min(tn.node.textContent!.length, hlEnd - tn.start);
 
       if (nodeStart === 0 && nodeEnd === tn.node.textContent!.length) {
-        // Whole node is highlighted
         const mark = doc.createElement("mark");
         mark.className = "highlight-yellow cursor-pointer";
         mark.dataset.highlightId = h.id;
         tn.node.parentNode!.replaceChild(mark, tn.node);
         mark.appendChild(tn.node);
       } else {
-        // Partial node — split and wrap
         const text = tn.node.textContent!;
         const before = text.substring(0, nodeStart);
         const middle = text.substring(nodeStart, nodeEnd);
@@ -84,7 +85,10 @@ export default function Reader() {
   const navigate = useNavigate();
   const [article, setArticle] = useState<Article | null>(null);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [menuTarget, setMenuTarget] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [noteComposer, setNoteComposer] = useState<{ highlightId: string; x: number; y: number } | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -95,7 +99,32 @@ export default function Reader() {
       else navigate("/");
     }).catch(() => navigate("/"));
     loadHighlights(id);
+    loadNotes(id);
   }, [id, navigate]);
+
+  // Restore scroll position for web articles
+  useEffect(() => {
+    if (article && (article.kind || "web") === "web" && typeof article.position === "number") {
+      window.scrollTo({ top: article.position });
+    }
+  }, [article]);
+
+  // Save scroll position (debounced) for web articles
+  useEffect(() => {
+    if (!article || (article.kind || "web") !== "web") return;
+    let t: number | undefined;
+    const onScroll = () => {
+      if (t) window.clearTimeout(t);
+      t = window.setTimeout(() => {
+        updateArticlePosition(article.id, window.scrollY);
+      }, 800);
+    };
+    window.addEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (t) window.clearTimeout(t);
+    };
+  }, [article]);
 
   async function loadHighlights(articleId: string) {
     try {
@@ -106,7 +135,15 @@ export default function Reader() {
     }
   }
 
-  // Compute highlighted HTML
+  async function loadNotes(articleId: string) {
+    try {
+      const n = await listNotes(articleId);
+      setNotes(n);
+    } catch (err) {
+      console.error("Failed to load notes:", err);
+    }
+  }
+
   const highlightedHtml = useMemo(() => {
     if (!article?.content) return "";
     return applyHighlightsToHtml(article.content, highlights);
@@ -122,7 +159,6 @@ export default function Reader() {
     const range = selection.getRangeAt(0);
     if (!contentRef.current?.contains(range.commonAncestorContainer)) return;
 
-    // Don't re-highlight already highlighted text
     const ancestor = range.commonAncestorContainer;
     const parentEl = ancestor.nodeType === Node.TEXT_NODE ? ancestor.parentElement : ancestor as Element;
     if (parentEl?.closest("[data-highlight-id]")) return;
@@ -134,7 +170,6 @@ export default function Reader() {
   async function doHighlight(text: string) {
     if (!article?.id) return;
 
-    // Get offset from the raw text content
     const container = contentRef.current;
     if (!container) return;
     const fullText = container.textContent || "";
@@ -168,27 +203,53 @@ export default function Reader() {
       e.stopPropagation();
       const hId = target.dataset.highlightId!;
       const rect = target.getBoundingClientRect();
-      setDeleteTarget({
+      setMenuTarget({
         id: hId,
         x: rect.left + rect.width / 2,
         y: rect.top + window.scrollY,
       });
       return;
     }
-    if (deleteTarget) setDeleteTarget(null);
+    if (menuTarget) setMenuTarget(null);
+    if (noteComposer) setNoteComposer(null);
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget || !article?.id) return;
-    await dbDeleteHighlight(deleteTarget.id);
-    setDeleteTarget(null);
-    loadHighlights(article.id);
-  }
-
-  async function handleDeleteFromPanel(hId: string) {
+  async function deleteHighlight(hId: string) {
     if (!article?.id) return;
     await dbDeleteHighlight(hId);
+    setMenuTarget(null);
+    setNoteComposer(null);
     loadHighlights(article.id);
+    loadNotes(article.id);
+  }
+
+  function jumpToHighlight(h: Highlight) {
+    const el = document.querySelector(`[data-highlight-id="${h.id}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("highlight-pulse");
+    setTimeout(() => el.classList.remove("highlight-pulse"), 1500);
+  }
+
+  function openNoteComposer(target: { id: string; x: number; y: number }) {
+    setNoteComposer({ highlightId: target.id, x: target.x, y: target.y });
+    setNoteDraft("");
+    setMenuTarget(null);
+  }
+
+  async function saveNoteFromComposer() {
+    if (!article?.id || !noteComposer || !noteDraft.trim()) {
+      setNoteComposer(null);
+      return;
+    }
+    await addNote({
+      articleId: article.id,
+      highlightId: noteComposer.highlightId,
+      body: noteDraft.trim(),
+    });
+    setNoteComposer(null);
+    setNoteDraft("");
+    loadNotes(article.id);
   }
 
   if (!article) {
@@ -197,6 +258,15 @@ export default function Reader() {
         Loading...
       </div>
     );
+  }
+
+  // Dispatch by kind: PDF and EPUB get their own viewers
+  const kind = article.kind || "web";
+  if (kind === "pdf") {
+    return <PdfReader article={article} />;
+  }
+  if (kind === "epub") {
+    return <EpubReader article={article} />;
   }
 
   function getDomain(url: string) {
@@ -251,32 +321,103 @@ export default function Reader() {
               onClick={handleContentClick}
             />
           </article>
-
-          <HighlightsPanel highlights={highlights} onDelete={handleDeleteFromPanel} />
         </div>
       </main>
 
-      {/* Delete highlight tooltip */}
-      {deleteTarget && (
+      {/* Highlight action menu (Jump / Note / Delete) */}
+      {menuTarget && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setDeleteTarget(null)} />
-          <button
-            className="fixed z-50 flex items-center gap-1.5 bg-stone-900 text-white rounded-lg shadow-lg
-                       px-3 py-2 text-xs font-sans hover:bg-red-600 transition-colors"
+          <div className="fixed inset-0 z-40" onClick={() => setMenuTarget(null)} />
+          <div
+            className="absolute z-50 flex items-center gap-1 bg-stone-900 text-white rounded-lg shadow-lg p-1"
             style={{
-              left: deleteTarget.x,
-              top: deleteTarget.y - 42,
+              left: menuTarget.x,
+              top: menuTarget.y - 42,
               transform: "translateX(-50%)",
             }}
-            onClick={confirmDelete}
           >
-            <Trash2 size={12} />
-            Remove highlight
-          </button>
+            <button
+              onClick={() => {
+                jumpToHighlight({ id: menuTarget.id } as Highlight);
+                setMenuTarget(null);
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
+              title="Jump to highlight"
+            >
+              <CornerDownLeft size={12} /> Jump
+            </button>
+            <button
+              onClick={() => openNoteComposer(menuTarget)}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-stone-700 rounded"
+              title="Add a note"
+            >
+              <StickyNote size={12} /> Note
+            </button>
+            <button
+              onClick={() => deleteHighlight(menuTarget.id)}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-sans hover:bg-red-600 rounded"
+              title="Delete highlight"
+            >
+              <Trash2 size={12} /> Delete
+            </button>
+          </div>
         </>
       )}
 
-      <ChatSidebar article={article} open={chatOpen} onToggle={setChatOpen} />
+      {/* Inline note composer */}
+      {noteComposer && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setNoteComposer(null)} />
+          <div
+            className="absolute z-50 bg-white border border-stone-200 rounded-lg shadow-xl p-3 w-72"
+            style={{
+              left: noteComposer.x,
+              top: noteComposer.y + 10,
+              transform: "translateX(-50%)",
+            }}
+          >
+            <textarea
+              autoFocus
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveNoteFromComposer();
+                if (e.key === "Escape") setNoteComposer(null);
+              }}
+              rows={3}
+              placeholder="Add a note... (Cmd+Enter to save)"
+              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-200 rounded text-sm font-sans focus:outline-none focus:ring-1 focus:ring-stone-300 resize-none"
+            />
+            <div className="flex justify-end gap-1 mt-2">
+              <button
+                onClick={() => setNoteComposer(null)}
+                className="p-1 text-stone-400 hover:text-stone-600 rounded"
+                title="Cancel"
+              >
+                <X size={14} />
+              </button>
+              <button
+                onClick={saveNoteFromComposer}
+                className="p-1 text-stone-400 hover:text-green-600 rounded"
+                title="Save"
+              >
+                <Check size={14} />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <RightSidebar
+        article={article}
+        open={chatOpen}
+        onToggle={setChatOpen}
+        highlights={highlights}
+        notes={notes}
+        onJumpToHighlight={(h) => jumpToHighlight(h)}
+        onDeleteHighlight={deleteHighlight}
+        onNotesChanged={() => loadNotes(article.id)}
+      />
     </div>
   );
 }

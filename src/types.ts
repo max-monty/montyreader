@@ -1,3 +1,5 @@
+export type ArticleKind = "web" | "pdf" | "epub";
+
 export interface Article {
   id: string;
   userId?: string;
@@ -10,6 +12,16 @@ export interface Article {
   siteName: string | null;
   publishedTime: string | null;
   savedAt: number;
+  // New optional fields for richer document support.
+  // `kind` defaults to "web" when missing (legacy rows).
+  kind?: ArticleKind;
+  storagePath?: string | null; // Firebase Storage path for PDF/EPUB binaries
+  fileSize?: number | null;
+  // Reading position — interpretation depends on kind:
+  //   web  -> scroll Y in pixels
+  //   pdf  -> 1-based page number
+  //   epub -> EPUB CFI string
+  position?: string | number | null;
 }
 
 export interface Highlight {
@@ -23,9 +35,21 @@ export interface Highlight {
   contextBefore: string;
   contextAfter: string;
   createdAt: number;
+  // Optional inline note tied to this highlight (legacy free-text)
+  note?: string | null;
 }
 
 export type HighlightColor = "yellow" | "green" | "blue" | "pink";
+
+export interface Note {
+  id: string;
+  userId?: string;
+  articleId: string | null; // null = standalone note (not tied to an article)
+  highlightId?: string | null; // null = independent of any highlight
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface ChatMessage {
   role: "user" | "assistant";
