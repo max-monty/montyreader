@@ -2,6 +2,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import express from "express";
 import cors from "cors";
 import { JSDOM } from "jsdom";
@@ -185,6 +186,35 @@ app.post("/api/clip", async (req, res) => {
   } catch (error) {
     console.error("Clip error:", error);
     res.status(500).json({ error: error.message || "Failed to clip article" });
+  }
+});
+
+// Sign a Cloud Storage path → return a short-lived public URL.
+// Signed URLs are served from storage.googleapis.com which has permissive CORS,
+// avoiding the firebasestorage.googleapis.com CORS restrictions.
+app.post("/api/sign", async (req, res) => {
+  try {
+    const { path, userId } = req.body;
+    if (!path || !userId) {
+      res.status(400).json({ error: "path and userId are required" });
+      return;
+    }
+    // Defense-in-depth: only allow signing files under the caller's own user prefix.
+    const expectedPrefix = `users/${userId}/`;
+    if (!path.startsWith(expectedPrefix)) {
+      res.status(403).json({ error: "Path does not belong to this user" });
+      return;
+    }
+    const bucket = getStorage().bucket();
+    const file = bucket.file(path);
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 60 * 60 * 1000, // 1 hour
+    });
+    res.json({ url });
+  } catch (error) {
+    console.error("Sign error:", error);
+    res.status(500).json({ error: error.message || "Failed to sign URL" });
   }
 });
 

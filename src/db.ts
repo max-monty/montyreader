@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { firestore, getCurrentUserId } from "./firebase";
 import type { Article, Highlight, Conversation, Note } from "./types";
+import { deleteDocument } from "./utils/storage";
 
 function getDb() {
   if (!firestore) throw new Error("Firebase not configured");
@@ -75,6 +76,18 @@ export async function findArticleByUrl(url: string): Promise<Article | null> {
 }
 
 export async function deleteArticle(id: string): Promise<void> {
+  // Look up the article first so we can also remove any associated Storage object.
+  try {
+    const snap = await getDoc(doc(getDb(), "articles", id));
+    if (snap.exists()) {
+      const data = snap.data() as Article;
+      if (data.storagePath) {
+        await deleteDocument(data.storagePath).catch((err) => console.warn("Storage delete failed:", err));
+      }
+    }
+  } catch (err) {
+    console.warn("Pre-delete fetch failed:", err);
+  }
   await deleteDoc(doc(getDb(), "articles", id));
   const hq = query(col("highlights"), where("articleId", "==", id));
   const hs = await getDocs(hq);

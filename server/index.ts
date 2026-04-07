@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import dotenv from "dotenv";
 import { initializeApp, cert, type ServiceAccount } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 dotenv.config();
 
@@ -191,6 +192,33 @@ app.post("/api/clip", async (req, res) => {
   } catch (error: any) {
     console.error("Clip error:", error);
     res.status(500).json({ error: error.message || "Failed to clip article" });
+  }
+});
+
+// Sign a Cloud Storage path → return a short-lived public URL.
+app.post("/api/sign", async (req, res) => {
+  try {
+    const { path, userId } = req.body;
+    if (!path || !userId) {
+      res.status(400).json({ error: "path and userId are required" });
+      return;
+    }
+    const expectedPrefix = `users/${userId}/`;
+    if (!path.startsWith(expectedPrefix)) {
+      res.status(403).json({ error: "Path does not belong to this user" });
+      return;
+    }
+    const bucketName = process.env.VITE_FIREBASE_STORAGE_BUCKET || "monty-reader.firebasestorage.app";
+    const bucket = getStorage().bucket(bucketName);
+    const file = bucket.file(path);
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 60 * 60 * 1000,
+    });
+    res.json({ url });
+  } catch (error: any) {
+    console.error("Sign error:", error);
+    res.status(500).json({ error: error.message || "Failed to sign URL" });
   }
 });
 
